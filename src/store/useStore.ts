@@ -588,16 +588,108 @@ function main() {
   },
 
   setMeshData: (meshData) => set({ meshData }),
-  setShapeData: (shapeData) =>
+  setShapeData: (shapeData) => {
+    const state = get();
+
+    // Sync face plane coordinates in elements with new shapeData
+    // This ensures sketches stay attached to faces when geometry changes (e.g., extrusion height)
+    let updatedElements = state.elements;
+    let needsCodeRegeneration = false;
+
+    if (shapeData && shapeData.individualFaces && shapeData.individualFaces.length > 0) {
+      updatedElements = state.elements.map((elem) => {
+        // Only update if this element is on a face plane
+        if (typeof elem.plane === 'object' && elem.plane.type === 'face') {
+          const facePlane = elem.plane as FacePlane;
+
+          // Find the corresponding face in the new shapeData
+          const updatedFace = shapeData.individualFaces.find(
+            (f) => f.faceIndex === facePlane.faceIndex
+          );
+
+          // If we found the face and it has plane data, update the element's plane coordinates
+          if (updatedFace && updatedFace.isPlanar && updatedFace.plane) {
+            const newPlane: FacePlane = {
+              type: 'face',
+              faceIndex: facePlane.faceIndex,
+              origin: updatedFace.plane.origin,
+              xDir: updatedFace.plane.xDir,
+              normal: updatedFace.plane.normal,
+            };
+
+            // Check if plane actually changed (avoid unnecessary updates)
+            const planeChanged =
+              facePlane.origin[0] !== newPlane.origin[0] ||
+              facePlane.origin[1] !== newPlane.origin[1] ||
+              facePlane.origin[2] !== newPlane.origin[2] ||
+              facePlane.xDir[0] !== newPlane.xDir[0] ||
+              facePlane.xDir[1] !== newPlane.xDir[1] ||
+              facePlane.xDir[2] !== newPlane.xDir[2] ||
+              facePlane.normal[0] !== newPlane.normal[0] ||
+              facePlane.normal[1] !== newPlane.normal[1] ||
+              facePlane.normal[2] !== newPlane.normal[2];
+
+            if (planeChanged) {
+              needsCodeRegeneration = true;
+              return {
+                ...elem,
+                plane: newPlane,
+              } as typeof elem;
+            }
+          }
+        }
+        return elem;
+      });
+
+      // Also update the active sketch plane if it's a face plane
+      if (typeof state.sketchPlane === 'object' && state.sketchPlane.type === 'face') {
+        const activeFacePlane = state.sketchPlane as FacePlane;
+        const updatedActiveFace = shapeData.individualFaces.find(
+          (f) => f.faceIndex === activeFacePlane.faceIndex
+        );
+
+        if (updatedActiveFace && updatedActiveFace.isPlanar && updatedActiveFace.plane) {
+          const newActivePlane: FacePlane = {
+            type: 'face',
+            faceIndex: activeFacePlane.faceIndex,
+            origin: updatedActiveFace.plane.origin,
+            xDir: updatedActiveFace.plane.xDir,
+            normal: updatedActiveFace.plane.normal,
+          };
+
+          set({
+            shapeData,
+            meshData: shapeData?.mesh ?? null,
+            elements: updatedElements,
+            sketchPlane: newActivePlane,
+            code: needsCodeRegeneration
+              ? generateReplicadCode(updatedElements, state.extrusionHeight)
+              : state.code,
+            // Clear selection when shape changes
+            selectedFaceIndices: new Set(),
+            selectedEdgeIndices: new Set(),
+            hoveredFaceIndex: null,
+            hoveredEdgeIndex: null,
+          });
+          return;
+        }
+      }
+    }
+
     set({
       shapeData,
       meshData: shapeData?.mesh ?? null,
+      elements: updatedElements,
+      code: needsCodeRegeneration
+        ? generateReplicadCode(updatedElements, state.extrusionHeight)
+        : state.code,
       // Clear selection when shape changes
       selectedFaceIndices: new Set(),
       selectedEdgeIndices: new Set(),
       hoveredFaceIndex: null,
       hoveredEdgeIndex: null,
-    }),
+    });
+  },
   setIsEvaluating: (isEvaluating) => set({ isEvaluating }),
   setError: (error) => set({ error }),
 
