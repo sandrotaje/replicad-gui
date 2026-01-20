@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { useStore, planesEqual, getElementCenter } from '../store/useStore';
+import { useStore, planesEqual, getElementCenter, getPlaneKey } from '../store/useStore';
 import type {
   Point,
   SketchElement,
@@ -63,6 +63,14 @@ export function Sketcher() {
   const selectElement = useStore((state) => state.selectElement);
   const deselectAll = useStore((state) => state.deselectAll);
   const sketchPlane = useStore((state) => state.sketchPlane);
+  const extrusionHeight = useStore((state) => state.extrusionHeight);
+  const setExtrusionHeight = useStore((state) => state.setExtrusionHeight);
+  const planeOperations = useStore((state) => state.planeOperations);
+  const setPlaneOperation = useStore((state) => state.setPlaneOperation);
+
+  // Get current plane's operation type
+  const currentPlaneKey = getPlaneKey(sketchPlane);
+  const currentOperation = planeOperations.get(currentPlaneKey) || 'extrude';
 
   // Filter elements by current plane
   const currentPlaneElements = useMemo(
@@ -1177,7 +1185,7 @@ export function Sketcher() {
         <div
           style={{
             position: 'absolute',
-            bottom: 10,
+            bottom: 60,
             left: 10,
             padding: '8px 12px',
             backgroundColor: 'rgba(30, 30, 46, 0.9)',
@@ -1198,6 +1206,94 @@ export function Sketcher() {
           )}
         </div>
       )}
+
+      {/* Extrusion controls panel */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 10,
+          left: 10,
+          right: 10,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '12px',
+          padding: '10px 16px',
+          backgroundColor: 'rgba(24, 24, 37, 0.95)',
+          borderRadius: '8px',
+          border: '1px solid #313244',
+        }}
+      >
+        <button
+          onClick={() => setPlaneOperation(currentPlaneKey, 'extrude')}
+          style={{
+            padding: '8px 16px',
+            border: currentOperation === 'extrude' ? '2px solid #a6e3a1' : '2px solid transparent',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontWeight: 600,
+            fontSize: '13px',
+            backgroundColor: currentOperation === 'extrude' ? '#a6e3a1' : '#313244',
+            color: currentOperation === 'extrude' ? '#1e1e2e' : '#cdd6f4',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            transition: 'all 0.2s',
+          }}
+          title="Extrude sketch upward (add material)"
+        >
+          <span style={{ fontSize: '16px' }}>↑</span>
+          Extrude
+        </button>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <label style={{ color: '#a6adc8', fontSize: '13px' }}>
+            Depth:
+          </label>
+          <input
+            type="number"
+            value={extrusionHeight}
+            onChange={(e) => {
+              const value = parseFloat(e.target.value);
+              if (!isNaN(value) && value > 0) {
+                setExtrusionHeight(value);
+              }
+            }}
+            style={{
+              width: '60px',
+              padding: '6px 10px',
+              border: '1px solid #313244',
+              borderRadius: '4px',
+              backgroundColor: '#1e1e2e',
+              color: '#cdd6f4',
+              fontSize: '13px',
+              textAlign: 'center',
+            }}
+          />
+        </div>
+
+        <button
+          onClick={() => setPlaneOperation(currentPlaneKey, 'cut')}
+          style={{
+            padding: '8px 16px',
+            border: currentOperation === 'cut' ? '2px solid #f38ba8' : '2px solid transparent',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontWeight: 600,
+            fontSize: '13px',
+            backgroundColor: currentOperation === 'cut' ? '#f38ba8' : '#313244',
+            color: currentOperation === 'cut' ? '#1e1e2e' : '#cdd6f4',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            transition: 'all 0.2s',
+          }}
+          title="Cut sketch downward (remove material)"
+        >
+          <span style={{ fontSize: '16px' }}>↓</span>
+          Cut
+        </button>
+      </div>
     </div>
   );
 }
