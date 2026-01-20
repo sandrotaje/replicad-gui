@@ -1,10 +1,207 @@
-import { Canvas } from '@react-three/fiber';
+import { Canvas, type ThreeEvent } from '@react-three/fiber';
 import { OrbitControls, Grid, Environment } from '@react-three/drei';
 import { useStore } from '../store/useStore';
-import { useMemo } from 'react';
+import { useMemo, useCallback, useEffect } from 'react';
 import * as THREE from 'three';
+import type { IndividualFace, IndividualEdge } from '../types';
 
-function Mesh() {
+// Colors
+const FACE_COLOR = '#89b4fa';
+const FACE_HOVER_COLOR = '#b4befe';
+const FACE_SELECTED_COLOR = '#f9e2af';
+const EDGE_COLOR = '#313244';
+const EDGE_HOVER_COLOR = '#fab387';
+const EDGE_SELECTED_COLOR = '#f9e2af';
+
+// Helper to find which group a triangle/line belongs to
+function findGroupIndex(index: number, groups: { start: number; count: number }[]): number {
+  for (let i = 0; i < groups.length; i++) {
+    const { start, count } = groups[i];
+    if (index >= start && index < start + count) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+// Component for a single selectable face mesh
+function SelectableFace({
+  face,
+  isSelected,
+  isHovered,
+  onSelect,
+  onHover,
+  onUnhover,
+}: {
+  face: IndividualFace;
+  isSelected: boolean;
+  isHovered: boolean;
+  onSelect: (e: ThreeEvent<MouseEvent>) => void;
+  onHover: (e: ThreeEvent<PointerEvent>) => void;
+  onUnhover: () => void;
+}) {
+  const geometry = useMemo(() => {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(face.vertices, 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(face.normals, 3));
+    geo.setIndex(new THREE.BufferAttribute(face.triangles, 1));
+    return geo;
+  }, [face]);
+
+  const color = isSelected ? FACE_SELECTED_COLOR : isHovered ? FACE_HOVER_COLOR : FACE_COLOR;
+
+  return (
+    <mesh
+      geometry={geometry}
+      rotation={[-Math.PI / 2, 0, 0]}
+      onClick={onSelect}
+      onPointerOver={onHover}
+      onPointerOut={onUnhover}
+    >
+      <meshStandardMaterial
+        color={color}
+        metalness={0.2}
+        roughness={0.5}
+        side={THREE.DoubleSide}
+      />
+    </mesh>
+  );
+}
+
+// Use individual face meshes for selection
+function IndividualFaceMeshes() {
+  const shapeData = useStore((state) => state.shapeData);
+  const selectionMode = useStore((state) => state.selectionMode);
+  const selectedFaceIndices = useStore((state) => state.selectedFaceIndices);
+  const hoveredFaceIndex = useStore((state) => state.hoveredFaceIndex);
+  const selectFace = useStore((state) => state.selectFace);
+  const setHoveredFace = useStore((state) => state.setHoveredFace);
+
+  if (!shapeData || shapeData.individualFaces.length === 0) return null;
+
+  const isSelectionEnabled = selectionMode === 'face';
+
+  return (
+    <group>
+      {shapeData.individualFaces.map((face) => (
+        <SelectableFace
+          key={face.faceIndex}
+          face={face}
+          isSelected={selectedFaceIndices.has(face.faceIndex)}
+          isHovered={hoveredFaceIndex === face.faceIndex}
+          onSelect={(e) => {
+            if (!isSelectionEnabled) return;
+            e.stopPropagation();
+            selectFace(face.faceIndex, e.nativeEvent.shiftKey);
+          }}
+          onHover={(e) => {
+            if (!isSelectionEnabled) return;
+            e.stopPropagation();
+            setHoveredFace(face.faceIndex);
+          }}
+          onUnhover={() => {
+            if (!isSelectionEnabled) return;
+            setHoveredFace(null);
+          }}
+        />
+      ))}
+    </group>
+  );
+}
+
+// Group-based mesh for when faceGroups are available
+function GroupBasedMesh() {
+  const shapeData = useStore((state) => state.shapeData);
+  const selectionMode = useStore((state) => state.selectionMode);
+  const selectedFaceIndices = useStore((state) => state.selectedFaceIndices);
+  const hoveredFaceIndex = useStore((state) => state.hoveredFaceIndex);
+  const selectFace = useStore((state) => state.selectFace);
+  const setHoveredFace = useStore((state) => state.setHoveredFace);
+
+  const { geometry, faceGroups } = useMemo(() => {
+    if (!shapeData) return { geometry: null, faceGroups: [] };
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(shapeData.mesh.vertices, 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(shapeData.mesh.normals, 3));
+    geo.setIndex(new THREE.BufferAttribute(shapeData.mesh.triangles, 1));
+
+    const groups = shapeData.mesh.faceGroups;
+    if (groups && groups.length > 0) {
+      groups.forEach(({ start, count }) => {
+        geo.addGroup(start, count, 0);
+      });
+    } else {
+      geo.addGroup(0, shapeData.mesh.triangles.length, 0);
+    }
+
+    return { geometry: geo, faceGroups: groups || [] };
+  }, [shapeData]);
+
+  const materials = useMemo(() => [
+    new THREE.MeshStandardMaterial({ color: FACE_COLOR, metalness: 0.2, roughness: 0.5, side: THREE.DoubleSide }),
+    new THREE.MeshStandardMaterial({ color: FACE_HOVER_COLOR, metalness: 0.2, roughness: 0.5, side: THREE.DoubleSide }),
+    new THREE.MeshStandardMaterial({ color: FACE_SELECTED_COLOR, metalness: 0.2, roughness: 0.5, side: THREE.DoubleSide }),
+  ], []);
+
+  useEffect(() => {
+    if (!geometry || faceGroups.length === 0) return;
+
+    geometry.groups.forEach((group, groupIndex) => {
+      const faceId = faceGroups[groupIndex]?.faceId ?? groupIndex;
+      if (selectedFaceIndices.has(faceId)) {
+        group.materialIndex = 2;
+      } else if (hoveredFaceIndex === faceId) {
+        group.materialIndex = 1;
+      } else {
+        group.materialIndex = 0;
+      }
+    });
+    (geometry as unknown as { groupsNeedUpdate: boolean }).groupsNeedUpdate = true;
+  }, [geometry, faceGroups, selectedFaceIndices, hoveredFaceIndex]);
+
+  const handlePointerMove = useCallback((e: ThreeEvent<PointerEvent>) => {
+    if (selectionMode !== 'face' || !faceGroups.length) return;
+    e.stopPropagation();
+
+    if (e.faceIndex != null) {
+      const triangleStart = e.faceIndex * 3;
+      const groupIndex = findGroupIndex(triangleStart, faceGroups);
+      if (groupIndex >= 0) {
+        setHoveredFace(faceGroups[groupIndex].faceId);
+      }
+    }
+  }, [selectionMode, faceGroups, setHoveredFace]);
+
+  const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
+    if (selectionMode !== 'face' || !faceGroups.length) return;
+    e.stopPropagation();
+
+    if (e.faceIndex != null) {
+      const triangleStart = e.faceIndex * 3;
+      const groupIndex = findGroupIndex(triangleStart, faceGroups);
+      if (groupIndex >= 0) {
+        selectFace(faceGroups[groupIndex].faceId, e.nativeEvent.shiftKey);
+      }
+    }
+  }, [selectionMode, faceGroups, selectFace]);
+
+  if (!geometry) return null;
+
+  return (
+    <mesh
+      geometry={geometry}
+      material={materials}
+      rotation={[-Math.PI / 2, 0, 0]}
+      onPointerMove={selectionMode === 'face' ? handlePointerMove : undefined}
+      onPointerOut={selectionMode === 'face' ? () => setHoveredFace(null) : undefined}
+      onClick={selectionMode === 'face' ? handleClick : undefined}
+    />
+  );
+}
+
+// Simple mesh when selection is not active
+function SimpleMesh() {
   const meshData = useStore((state) => state.meshData);
 
   const geometry = useMemo(() => {
@@ -14,33 +211,197 @@ function Mesh() {
     geo.setAttribute('position', new THREE.BufferAttribute(meshData.vertices, 3));
     geo.setAttribute('normal', new THREE.BufferAttribute(meshData.normals, 3));
     geo.setIndex(new THREE.BufferAttribute(meshData.triangles, 1));
-
     return geo;
   }, [meshData]);
 
   if (!geometry) return null;
 
-  // Rotate -90 degrees around X axis to convert from Z-up (CAD) to Y-up (Three.js)
   return (
     <mesh geometry={geometry} rotation={[-Math.PI / 2, 0, 0]}>
-      <meshStandardMaterial
-        color="#89b4fa"
-        metalness={0.2}
-        roughness={0.5}
-        side={THREE.DoubleSide}
-      />
+      <meshStandardMaterial color={FACE_COLOR} metalness={0.2} roughness={0.5} side={THREE.DoubleSide} />
     </mesh>
   );
 }
 
+// Component for individual edge with tube for picking
+function SelectableEdge({
+  edge,
+  isSelected,
+  isHovered,
+  onSelect,
+  onHover,
+  onUnhover,
+}: {
+  edge: IndividualEdge;
+  isSelected: boolean;
+  isHovered: boolean;
+  onSelect: (e: ThreeEvent<MouseEvent>) => void;
+  onHover: (e: ThreeEvent<PointerEvent>) => void;
+  onUnhover: () => void;
+}) {
+  const { lineGeometry, tubeGeometry } = useMemo(() => {
+    // Transform coordinates from CAD (Z-up) to Three.js (Y-up)
+    const positions = edge.vertices;
+    const transformed = new Float32Array(positions.length);
+    const points: THREE.Vector3[] = [];
+
+    for (let i = 0; i < positions.length; i += 3) {
+      transformed[i] = positions[i];
+      transformed[i + 1] = positions[i + 2];
+      transformed[i + 2] = -positions[i + 1];
+      points.push(new THREE.Vector3(transformed[i], transformed[i + 1], transformed[i + 2]));
+    }
+
+    const lineGeo = new THREE.BufferGeometry();
+    lineGeo.setAttribute('position', new THREE.BufferAttribute(transformed, 3));
+
+    // Create tube geometry for picking (invisible but clickable)
+    let tubeGeo: THREE.TubeGeometry | null = null;
+    if (points.length >= 2) {
+      const curve = new THREE.CatmullRomCurve3(points);
+      tubeGeo = new THREE.TubeGeometry(curve, Math.max(2, points.length), 1.5, 8, false);
+    }
+
+    return { lineGeometry: lineGeo, tubeGeometry: tubeGeo };
+  }, [edge]);
+
+  const color = isSelected ? EDGE_SELECTED_COLOR : isHovered ? EDGE_HOVER_COLOR : EDGE_COLOR;
+
+  return (
+    <group>
+      <lineSegments geometry={lineGeometry}>
+        <lineBasicMaterial color={color} linewidth={isSelected || isHovered ? 3 : 1.5} />
+      </lineSegments>
+      {tubeGeometry && (
+        <mesh
+          geometry={tubeGeometry}
+          visible={false}
+          onClick={onSelect}
+          onPointerOver={onHover}
+          onPointerOut={onUnhover}
+        >
+          <meshBasicMaterial transparent opacity={0} />
+        </mesh>
+      )}
+    </group>
+  );
+}
+
+function IndividualEdgeMeshes() {
+  const shapeData = useStore((state) => state.shapeData);
+  const selectionMode = useStore((state) => state.selectionMode);
+  const selectedEdgeIndices = useStore((state) => state.selectedEdgeIndices);
+  const hoveredEdgeIndex = useStore((state) => state.hoveredEdgeIndex);
+  const selectEdge = useStore((state) => state.selectEdge);
+  const setHoveredEdge = useStore((state) => state.setHoveredEdge);
+
+  if (!shapeData || shapeData.individualEdges.length === 0) return null;
+
+  const isSelectionEnabled = selectionMode === 'edge';
+
+  return (
+    <group>
+      {shapeData.individualEdges.map((edge) => (
+        <SelectableEdge
+          key={edge.edgeIndex}
+          edge={edge}
+          isSelected={selectedEdgeIndices.has(edge.edgeIndex)}
+          isHovered={hoveredEdgeIndex === edge.edgeIndex}
+          onSelect={(e) => {
+            if (!isSelectionEnabled) return;
+            e.stopPropagation();
+            selectEdge(edge.edgeIndex, e.nativeEvent.shiftKey);
+          }}
+          onHover={(e) => {
+            if (!isSelectionEnabled) return;
+            e.stopPropagation();
+            setHoveredEdge(edge.edgeIndex);
+          }}
+          onUnhover={() => {
+            if (!isSelectionEnabled) return;
+            setHoveredEdge(null);
+          }}
+        />
+      ))}
+    </group>
+  );
+}
+
+function SimpleEdges() {
+  const shapeData = useStore((state) => state.shapeData);
+
+  const geometry = useMemo(() => {
+    if (!shapeData || !shapeData.edges.lines.length) return null;
+
+    const positions = shapeData.edges.lines;
+    const transformed = new Float32Array(positions.length);
+    for (let i = 0; i < positions.length; i += 3) {
+      transformed[i] = positions[i];
+      transformed[i + 1] = positions[i + 2];
+      transformed[i + 2] = -positions[i + 1];
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(transformed, 3));
+    return geo;
+  }, [shapeData]);
+
+  if (!geometry) return null;
+
+  return (
+    <lineSegments geometry={geometry}>
+      <lineBasicMaterial color={EDGE_COLOR} linewidth={1.5} />
+    </lineSegments>
+  );
+}
+
 function Scene() {
+  const shapeData = useStore((state) => state.shapeData);
+  const selectionMode = useStore((state) => state.selectionMode);
+  const clearSelection = useStore((state) => state.clearSelection);
+
+  const handleBackgroundClick = useCallback(() => {
+    if (selectionMode !== 'none') {
+      clearSelection();
+    }
+  }, [selectionMode, clearSelection]);
+
+  // Determine which components to render based on available data and selection mode
+  const hasIndividualFaces = shapeData && shapeData.individualFaces.length > 0;
+  const hasFaceGroups = shapeData && shapeData.mesh.faceGroups.length > 0;
+  const hasIndividualEdges = shapeData && shapeData.individualEdges.length > 0;
+
+  const renderFaces = () => {
+    if (selectionMode === 'face') {
+      if (hasIndividualFaces) {
+        return <IndividualFaceMeshes />;
+      } else if (hasFaceGroups) {
+        return <GroupBasedMesh />;
+      }
+    }
+    return <SimpleMesh />;
+  };
+
+  const renderEdges = () => {
+    if (selectionMode === 'edge' && hasIndividualEdges) {
+      return <IndividualEdgeMeshes />;
+    }
+    return <SimpleEdges />;
+  };
+
   return (
     <>
       <ambientLight intensity={0.5} />
       <directionalLight position={[10, 10, 10]} intensity={1} />
       <directionalLight position={[-10, -10, -10]} intensity={0.3} />
 
-      <Mesh />
+      {shapeData && renderFaces()}
+      {shapeData && renderEdges()}
+
+      <mesh visible={false} onClick={handleBackgroundClick} position={[0, -0.1, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[10000, 10000]} />
+        <meshBasicMaterial />
+      </mesh>
 
       <Grid
         args={[200, 200]}
@@ -56,11 +417,7 @@ function Scene() {
         infiniteGrid={true}
       />
 
-      <OrbitControls
-        makeDefault
-        minPolarAngle={0}
-        maxPolarAngle={Math.PI}
-      />
+      <OrbitControls makeDefault minPolarAngle={0} maxPolarAngle={Math.PI} />
       <Environment preset="studio" />
     </>
   );
@@ -70,6 +427,9 @@ export function Viewer3D() {
   const isEvaluating = useStore((state) => state.isEvaluating);
   const error = useStore((state) => state.error);
   const meshData = useStore((state) => state.meshData);
+  const selectionMode = useStore((state) => state.selectionMode);
+  const selectedFaceIndices = useStore((state) => state.selectedFaceIndices);
+  const selectedEdgeIndices = useStore((state) => state.selectedEdgeIndices);
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
@@ -80,7 +440,33 @@ export function Viewer3D() {
         <Scene />
       </Canvas>
 
-      {/* Status overlays */}
+      {selectionMode !== 'none' && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '16px',
+            left: '16px',
+            backgroundColor: 'rgba(30, 30, 46, 0.9)',
+            padding: '8px 12px',
+            borderRadius: '6px',
+            color: '#cdd6f4',
+            fontSize: '12px',
+          }}
+        >
+          <div style={{ marginBottom: '4px', fontWeight: 'bold' }}>
+            {selectionMode === 'face' ? 'Face' : 'Edge'} Selection Mode
+          </div>
+          <div style={{ color: '#a6adc8' }}>
+            {selectionMode === 'face'
+              ? `${selectedFaceIndices.size} face(s) selected`
+              : `${selectedEdgeIndices.size} edge(s) selected`}
+          </div>
+          <div style={{ color: '#6c7086', fontSize: '11px', marginTop: '4px' }}>
+            Shift+click for multi-select
+          </div>
+        </div>
+      )}
+
       {isEvaluating && (
         <div
           style={{

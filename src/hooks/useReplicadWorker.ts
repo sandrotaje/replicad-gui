@@ -7,6 +7,7 @@ export function useReplicadWorker() {
   const isReadyRef = useRef(false);
 
   const setMeshData = useStore((state) => state.setMeshData);
+  const setShapeData = useStore((state) => state.setShapeData);
   const setIsEvaluating = useStore((state) => state.setIsEvaluating);
   const setError = useStore((state) => state.setError);
 
@@ -17,8 +18,8 @@ export function useReplicadWorker() {
     );
 
     workerRef.current.onmessage = (event: MessageEvent<WorkerMessage>) => {
-      const { type, meshData, error } = event.data;
-      console.log('[Worker Response]', type, { meshData, error });
+      const { type, meshData, shapeData, error } = event.data;
+      console.log('[Worker Response]', type, { meshData, shapeData, error });
 
       if (type === 'ready') {
         isReadyRef.current = true;
@@ -26,8 +27,12 @@ export function useReplicadWorker() {
       }
 
       if (type === 'result') {
-        console.log('[Worker] Result received, meshData:', meshData);
-        setMeshData(meshData ?? null);
+        console.log('[Worker] Result received, shapeData:', shapeData);
+        if (shapeData) {
+          setShapeData(shapeData);
+        } else {
+          setMeshData(meshData ?? null);
+        }
         setIsEvaluating(false);
         setError(null);
       }
@@ -51,7 +56,7 @@ export function useReplicadWorker() {
     return () => {
       workerRef.current?.terminate();
     };
-  }, [setMeshData, setIsEvaluating, setError]);
+  }, [setMeshData, setShapeData, setIsEvaluating, setError]);
 
   const evaluate = useCallback((code: string) => {
     if (workerRef.current) {
