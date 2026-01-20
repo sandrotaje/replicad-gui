@@ -1,9 +1,9 @@
 import { useStore, getPlaneKey, planesEqual } from '../store/useStore';
-import type { SketchPlane, FacePlane } from '../types';
+import type { SketchPlane, FacePlane, SketchElement } from '../types';
 
 interface SketchGroup {
   plane: SketchPlane;
-  count: number;
+  elements: SketchElement[];
 }
 
 function getPlaneName(plane: SketchPlane): string {
@@ -13,21 +13,35 @@ function getPlaneName(plane: SketchPlane): string {
   return `Face ${(plane as FacePlane).faceIndex}`;
 }
 
+function getElementSummary(elements: SketchElement[]): string {
+  const counts: Record<string, number> = {};
+  for (const el of elements) {
+    counts[el.type] = (counts[el.type] || 0) + 1;
+  }
+
+  const parts = Object.entries(counts).map(([type, count]) => {
+    const plural = count !== 1 ? 's' : '';
+    return `${count} ${type}${plural}`;
+  });
+
+  return parts.join(', ');
+}
+
 export function SketchList() {
-  const rectangles = useStore((state) => state.rectangles);
+  const elements = useStore((state) => state.elements);
   const sketchPlane = useStore((state) => state.sketchPlane);
   const setSketchPlane = useStore((state) => state.setSketchPlane);
 
-  // Group rectangles by plane
+  // Group elements by plane
   const sketchGroups: SketchGroup[] = [];
   const seenPlanes = new Map<string, SketchGroup>();
 
-  for (const rect of rectangles) {
-    const key = getPlaneKey(rect.plane);
+  for (const elem of elements) {
+    const key = getPlaneKey(elem.plane);
     if (seenPlanes.has(key)) {
-      seenPlanes.get(key)!.count++;
+      seenPlanes.get(key)!.elements.push(elem);
     } else {
-      const group = { plane: rect.plane, count: 1 };
+      const group = { plane: elem.plane, elements: [elem] };
       seenPlanes.set(key, group);
       sketchGroups.push(group);
     }
@@ -38,7 +52,7 @@ export function SketchList() {
       <div className="sketch-list">
         <div className="sketch-list-header">Sketches</div>
         <div className="sketch-list-empty">
-          No sketches yet. Draw rectangles on the canvas to create sketches.
+          No sketches yet. Draw shapes on the canvas to create sketches.
         </div>
       </div>
     );
@@ -60,7 +74,7 @@ export function SketchList() {
                 {getPlaneName(group.plane)}
               </span>
               <span className="sketch-list-item-count">
-                {group.count} rect{group.count !== 1 ? 's' : ''}
+                {getElementSummary(group.elements)}
               </span>
             </button>
           );

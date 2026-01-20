@@ -1,10 +1,10 @@
 import { useStore } from '../store/useStore';
-import type { StandardPlane } from '../types';
+import type { StandardPlane, SketchTool } from '../types';
 
 export function Toolbar() {
   const currentTool = useStore((state) => state.currentTool);
   const setCurrentTool = useStore((state) => state.setCurrentTool);
-  const rectangles = useStore((state) => state.rectangles);
+  const elements = useStore((state) => state.elements);
   const extrusionHeight = useStore((state) => state.extrusionHeight);
   const setExtrusionHeight = useStore((state) => state.setExtrusionHeight);
   const selectionMode = useStore((state) => state.selectionMode);
@@ -27,7 +27,7 @@ export function Toolbar() {
   })();
 
   const buttonStyle = (isActive: boolean) => ({
-    padding: '8px 16px',
+    padding: '8px 12px',
     border: 'none',
     borderRadius: '6px',
     cursor: 'pointer',
@@ -50,32 +50,50 @@ export function Toolbar() {
     color: isActive ? '#1e1e2e' : '#cdd6f4',
   });
 
+  // Tool definitions with icons and labels
+  const tools: { tool: SketchTool; icon: string; label: string; title: string }[] = [
+    { tool: 'select', icon: '↖', label: 'Select', title: 'Select Tool (V)' },
+    { tool: 'rectangle', icon: '▢', label: 'Rect', title: 'Rectangle Tool (R)' },
+    { tool: 'circle', icon: '○', label: 'Circle', title: 'Circle Tool (C)' },
+    { tool: 'line', icon: '/', label: 'Line', title: 'Line Tool (L)' },
+    { tool: 'hline', icon: '―', label: 'H-Line', title: 'Horizontal Line Tool (H)' },
+    { tool: 'vline', icon: '|', label: 'V-Line', title: 'Vertical Line Tool (Shift+V)' },
+    { tool: 'arc', icon: '⌒', label: 'Arc', title: 'Arc Tool (A)' },
+    { tool: 'spline', icon: '~', label: 'Spline', title: 'Spline Tool (S)' },
+  ];
+
+  // Count elements by type
+  const elementCounts = elements.reduce((acc, el) => {
+    acc[el.type] = (acc[el.type] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const totalElements = elements.length;
+
   return (
     <div
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: '16px',
-        padding: '12px 16px',
+        gap: '12px',
+        padding: '10px 16px',
         backgroundColor: '#181825',
         borderBottom: '1px solid #313244',
+        flexWrap: 'wrap',
       }}
     >
-      <div style={{ display: 'flex', gap: '8px' }}>
-        <button
-          style={buttonStyle(currentTool === 'select')}
-          onClick={() => setCurrentTool('select')}
-          title="Select Tool (S)"
-        >
-          ↖ Select
-        </button>
-        <button
-          style={buttonStyle(currentTool === 'rectangle')}
-          onClick={() => setCurrentTool('rectangle')}
-          title="Rectangle Tool (R)"
-        >
-          ▢ Rectangle
-        </button>
+      {/* Drawing Tools */}
+      <div style={{ display: 'flex', gap: '4px' }}>
+        {tools.map(({ tool, icon, label, title }) => (
+          <button
+            key={tool}
+            style={buttonStyle(currentTool === tool)}
+            onClick={() => setCurrentTool(tool)}
+            title={title}
+          >
+            {icon} {label}
+          </button>
+        ))}
       </div>
 
       <div
@@ -86,7 +104,8 @@ export function Toolbar() {
         }}
       />
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      {/* Plane Selection */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
         <label style={{ color: '#a6adc8', fontSize: '13px' }}>
           Plane:
         </label>
@@ -115,9 +134,10 @@ export function Toolbar() {
         }}
       />
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      {/* Extrusion Height */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
         <label style={{ color: '#a6adc8', fontSize: '13px' }}>
-          Extrusion Height:
+          Extrude:
         </label>
         <input
           type="number"
@@ -129,8 +149,8 @@ export function Toolbar() {
             }
           }}
           style={{
-            width: '60px',
-            padding: '6px 8px',
+            width: '50px',
+            padding: '5px 8px',
             border: '1px solid #313244',
             borderRadius: '4px',
             backgroundColor: '#1e1e2e',
@@ -140,6 +160,7 @@ export function Toolbar() {
         />
       </div>
 
+      {/* 3D Selection (only show when shape exists) */}
       {shapeData && (
         <>
           <div
@@ -150,9 +171,9 @@ export function Toolbar() {
             }}
           />
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <label style={{ color: '#a6adc8', fontSize: '13px' }}>
-              3D Select:
+              3D:
             </label>
             <button
               style={smallButtonStyle(selectionMode === 'face')}
@@ -179,7 +200,6 @@ export function Toolbar() {
                   fontSize: '12px',
                   backgroundColor: '#f9e2af',
                   color: '#1e1e2e',
-                  marginLeft: '8px',
                 }}
                 onClick={() => sketchOnFace(selectedPlanarFace.faceIndex)}
                 title="Sketch on selected face"
@@ -193,8 +213,16 @@ export function Toolbar() {
 
       <div style={{ flex: 1 }} />
 
+      {/* Element Count */}
       <span style={{ color: '#6c7086', fontSize: '12px' }}>
-        {rectangles.length} rectangle{rectangles.length !== 1 ? 's' : ''}
+        {totalElements} element{totalElements !== 1 ? 's' : ''}
+        {totalElements > 0 && (
+          <span style={{ marginLeft: '4px' }}>
+            ({Object.entries(elementCounts)
+              .map(([type, count]) => `${count} ${type}${count !== 1 ? 's' : ''}`)
+              .join(', ')})
+          </span>
+        )}
       </span>
     </div>
   );

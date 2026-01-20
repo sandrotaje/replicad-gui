@@ -15,18 +15,91 @@ export interface FacePlane {
 
 export type SketchPlane = StandardPlane | FacePlane;
 
+// Base interface for all sketch elements
+export interface SketchElementBase {
+  id: string;
+  plane: SketchPlane;
+  selected: boolean;
+}
+
+// Rectangle: defined by two corner points
+export interface RectangleElement extends SketchElementBase {
+  type: 'rectangle';
+  start: Point;
+  end: Point;
+}
+
+// Circle: defined by center and radius
+export interface CircleElement extends SketchElementBase {
+  type: 'circle';
+  center: Point;
+  radius: number;
+}
+
+// Line: general line from start to end
+export interface LineElement extends SketchElementBase {
+  type: 'line';
+  start: Point;
+  end: Point;
+}
+
+// Horizontal line: starts at a point, extends horizontally
+export interface HLineElement extends SketchElementBase {
+  type: 'hline';
+  start: Point;
+  length: number; // positive = right, negative = left
+}
+
+// Vertical line: starts at a point, extends vertically
+export interface VLineElement extends SketchElementBase {
+  type: 'vline';
+  start: Point;
+  length: number; // positive = up, negative = down
+}
+
+// Arc: defined by center, radius, and start/end angles (in radians)
+export interface ArcElement extends SketchElementBase {
+  type: 'arc';
+  center: Point;
+  radius: number;
+  startAngle: number;
+  endAngle: number;
+}
+
+// Spline: smooth curve through multiple points
+export interface SplineElement extends SketchElementBase {
+  type: 'spline';
+  points: Point[];
+}
+
+// Union type of all sketch elements
+export type SketchElement =
+  | RectangleElement
+  | CircleElement
+  | LineElement
+  | HLineElement
+  | VLineElement
+  | ArcElement
+  | SplineElement;
+
+// Tool types for the sketcher
+export type SketchTool =
+  | 'select'
+  | 'rectangle'
+  | 'circle'
+  | 'line'
+  | 'hline'
+  | 'vline'
+  | 'arc'
+  | 'spline';
+
+// Legacy Rectangle type (for backward compatibility during migration)
 export interface Rectangle {
   id: string;
   start: Point;
   end: Point;
   selected: boolean;
   plane: SketchPlane;
-}
-
-export interface SketchElement {
-  type: 'rectangle';
-  id: string;
-  data: Rectangle;
 }
 
 export interface MeshData {
