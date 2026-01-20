@@ -3,11 +3,24 @@ export interface Point {
   y: number;
 }
 
+export type StandardPlane = 'XY' | 'XZ' | 'YZ';
+
+export interface FacePlane {
+  type: 'face';
+  faceIndex: number;
+  origin: [number, number, number];
+  xDir: [number, number, number];
+  normal: [number, number, number];
+}
+
+export type SketchPlane = StandardPlane | FacePlane;
+
 export interface Rectangle {
   id: string;
   start: Point;
   end: Point;
   selected: boolean;
+  plane: SketchPlane;
 }
 
 export interface SketchElement {
@@ -51,6 +64,12 @@ export interface IndividualFace {
   vertices: Float32Array;
   normals: Float32Array;
   triangles: Uint32Array;
+  isPlanar?: boolean;
+  plane?: {
+    origin: [number, number, number];
+    xDir: [number, number, number];
+    normal: [number, number, number];
+  };
 }
 
 export interface IndividualEdge {
