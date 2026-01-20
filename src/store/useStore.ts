@@ -9,17 +9,21 @@ import type {
   FacePlane,
   SketchTool,
   Point,
+  OperationType,
 } from '../types';
 import { parseElementsFromCode, parseExtrusionHeightFromCode } from '../utils/codeParser';
 
+// Re-export OperationType for convenience
+export type { OperationType } from '../types';
+
 // Type for adding elements - uses discriminated union properly
-type NewElement = Omit<RectangleElement, 'plane' | 'selected'> |
-  Omit<SketchElement & { type: 'circle' }, 'plane' | 'selected'> |
-  Omit<SketchElement & { type: 'line' }, 'plane' | 'selected'> |
-  Omit<SketchElement & { type: 'hline' }, 'plane' | 'selected'> |
-  Omit<SketchElement & { type: 'vline' }, 'plane' | 'selected'> |
-  Omit<SketchElement & { type: 'arc' }, 'plane' | 'selected'> |
-  Omit<SketchElement & { type: 'spline' }, 'plane' | 'selected'>;
+type NewElement = Omit<RectangleElement, 'plane' | 'selected' | 'operation'> |
+  Omit<SketchElement & { type: 'circle' }, 'plane' | 'selected' | 'operation'> |
+  Omit<SketchElement & { type: 'line' }, 'plane' | 'selected' | 'operation'> |
+  Omit<SketchElement & { type: 'hline' }, 'plane' | 'selected' | 'operation'> |
+  Omit<SketchElement & { type: 'vline' }, 'plane' | 'selected' | 'operation'> |
+  Omit<SketchElement & { type: 'arc' }, 'plane' | 'selected' | 'operation'> |
+  Omit<SketchElement & { type: 'spline' }, 'plane' | 'selected' | 'operation'>;
 
 type UpdateSource = 'sketch' | 'code' | null;
 
@@ -47,6 +51,9 @@ interface AppState {
 
   // Extrusion state
   extrusionHeight: number;
+
+  // Operation type per plane (extrude or cut)
+  planeOperations: Map<string, OperationType>;
 
   // Sketch plane state (current plane for new elements)
   sketchPlane: SketchPlane;
@@ -78,6 +85,8 @@ interface AppState {
   // Sketch plane actions
   setSketchPlane: (plane: SketchPlane) => void;
   sketchOnFace: (faceIndex: number) => void;
+  setPlaneOperation: (planeKey: string, operation: OperationType) => void;
+  getCurrentPlaneOperation: () => OperationType;
 
   // 3D Selection actions
   setSelectionMode: (mode: SelectionMode) => void;
@@ -205,6 +214,9 @@ function generateElementCode(
   const isStandardPlane = typeof element.plane === 'string';
   const standardPlane = isStandardPlane ? (element.plane as string) : null;
 
+  // For cut operations, extrude in the negative direction (into the shape)
+  const actualExtrusionHeight = element.operation === 'cut' ? -extrusionHeight : extrusionHeight;
+
   const getTranslateOffset = (centerX: number, centerY: number): string => {
     if (isStandardPlane) {
       return standardPlane === 'XY'
@@ -236,7 +248,7 @@ function generateElementCode(
       const centerY = (element.start.y + element.end.y) / 2;
       return `  const ${shapeName} = drawRectangle(${width.toFixed(2)}, ${height.toFixed(2)})
     .sketchOnPlane(${planeArg})
-    .extrude(${extrusionHeight})
+    .extrude(${actualExtrusionHeight})
     .translate(${getTranslateOffset(centerX, centerY)});`;
     }
 
@@ -244,7 +256,7 @@ function generateElementCode(
       const { center, radius } = element;
       return `  const ${shapeName} = drawCircle(${radius.toFixed(2)})
     .sketchOnPlane(${planeArg})
-    .extrude(${extrusionHeight})
+    .extrude(${actualExtrusionHeight})
     .translate(${getTranslateOffset(center.x, center.y)});`;
     }
 
@@ -311,7 +323,10 @@ function generateElementCode(
   }
 }
 
-function generateReplicadCode(elements: SketchElement[], extrusionHeight: number): string {
+function generateReplicadCode(
+  elements: SketchElement[],
+  extrusionHeight: number
+): string {
   if (elements.length === 0) {
     return `// Draw shapes on the sketcher
 function main() {
@@ -331,7 +346,8 @@ function main() {
     planeGroups.get(key)!.elems.push(elem);
   }
 
-  const allShapeNames: string[] = [];
+  const extrudeShapeNames: string[] = [];
+  const cutShapeNames: string[] = [];
   const codeBlocks: string[] = [];
   let shapeCounter = 1;
 
@@ -355,10 +371,14 @@ function main() {
     for (const elem of elems) {
       const shapeName = `shape${shapeCounter}`;
 
-      // Only add extrudable shapes to the fusion list
+      // Only add extrudable shapes to the appropriate list based on element's operation
       const isExtrudable = elem.type === 'rectangle' || elem.type === 'circle';
       if (isExtrudable) {
-        allShapeNames.push(shapeName);
+        if (elem.operation === 'cut') {
+          cutShapeNames.push(shapeName);
+        } else {
+          extrudeShapeNames.push(shapeName);
+        }
       }
 
       const elemCode = generateElementCode(elem, shapeName, extrusionHeight, planeVarName);
@@ -367,23 +387,41 @@ function main() {
     }
   }
 
-  // Combine all extrudable shapes
-  let fuseCode: string;
-  if (allShapeNames.length === 0) {
-    fuseCode = `\n  return null; // No extrudable shapes`;
-  } else if (allShapeNames.length === 1) {
-    fuseCode = `\n  return ${allShapeNames[0]};`;
+  // Combine all extrudable shapes, then apply cuts
+  let combineCode: string;
+  if (extrudeShapeNames.length === 0 && cutShapeNames.length === 0) {
+    combineCode = `\n  return null; // No extrudable shapes`;
+  } else if (extrudeShapeNames.length === 0) {
+    // Only cut shapes, nothing to cut from
+    combineCode = `\n  return null; // No base shapes to cut from`;
+  } else if (extrudeShapeNames.length === 1 && cutShapeNames.length === 0) {
+    combineCode = `\n  return ${extrudeShapeNames[0]};`;
   } else {
-    fuseCode = `\n  // Combine all shapes
-  let result = ${allShapeNames[0]};
-${allShapeNames.slice(1).map((name) => `  result = result.fuse(${name});`).join('\n')}
-  return result;`;
+    const lines: string[] = [];
+    lines.push(`\n  // Combine all shapes`);
+    lines.push(`  let result = ${extrudeShapeNames[0]};`);
+
+    // Fuse extrude shapes
+    for (let i = 1; i < extrudeShapeNames.length; i++) {
+      lines.push(`  result = result.fuse(${extrudeShapeNames[i]});`);
+    }
+
+    // Apply cuts
+    if (cutShapeNames.length > 0) {
+      lines.push(`\n  // Apply cuts`);
+      for (const cutName of cutShapeNames) {
+        lines.push(`  result = result.cut(${cutName});`);
+      }
+    }
+
+    lines.push(`  return result;`);
+    combineCode = lines.join('\n');
   }
 
   return `// Available: drawRectangle, drawCircle, drawRoundedRectangle, draw, makeBox, Plane, etc.
 function main() {
 ${codeBlocks.join('\n\n')}
-${fuseCode}
+${combineCode}
 }
 `;
 }
@@ -413,6 +451,7 @@ function main() {
   hoveredEdgeIndex: null,
 
   extrusionHeight: 10,
+  planeOperations: new Map<string, OperationType>(),
   sketchPlane: 'XY' as SketchPlane,
   lastUpdateSource: null,
 
@@ -427,10 +466,13 @@ function main() {
   // Actions
   addElement: (elemWithoutPlane: NewElement) => {
     const state = get();
+    const planeKey = getPlaneKey(state.sketchPlane);
+    const operation = state.planeOperations.get(planeKey) || 'extrude';
     const newElement = {
       ...elemWithoutPlane,
       plane: state.sketchPlane,
       selected: false,
+      operation,
     } as SketchElement;
     const newElements = [...state.elements, newElement];
     const code = generateReplicadCode(newElements, state.extrusionHeight);
@@ -601,6 +643,32 @@ function main() {
     });
   },
 
+  setPlaneOperation: (planeKey, operation) => {
+    const state = get();
+    const newPlaneOperations = new Map(state.planeOperations);
+    newPlaneOperations.set(planeKey, operation);
+    // Update all elements on this plane to use the new operation
+    const newElements = state.elements.map((e) => {
+      if (getPlaneKey(e.plane) === planeKey) {
+        return { ...e, operation } as typeof e;
+      }
+      return e;
+    });
+    const code = generateReplicadCode(newElements, state.extrusionHeight);
+    set({
+      planeOperations: newPlaneOperations,
+      elements: newElements,
+      code,
+      lastUpdateSource: 'sketch',
+    });
+  },
+
+  getCurrentPlaneOperation: () => {
+    const state = get();
+    const planeKey = getPlaneKey(state.sketchPlane);
+    return state.planeOperations.get(planeKey) || 'extrude';
+  },
+
   // 3D Selection actions
   setSelectionMode: (mode) =>
     set({
@@ -658,11 +726,14 @@ function main() {
   // Legacy compatibility methods
   addRectangle: (rect) => {
     const state = get();
+    const planeKey = getPlaneKey(state.sketchPlane);
+    const operation = state.planeOperations.get(planeKey) || 'extrude';
     const newElement: RectangleElement = {
       ...rect,
       type: 'rectangle',
       plane: state.sketchPlane,
       selected: false,
+      operation,
     };
     const newElements = [...state.elements, newElement];
     const code = generateReplicadCode(newElements, state.extrusionHeight);

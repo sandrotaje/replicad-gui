@@ -5,8 +5,6 @@ export function Toolbar() {
   const currentTool = useStore((state) => state.currentTool);
   const setCurrentTool = useStore((state) => state.setCurrentTool);
   const elements = useStore((state) => state.elements);
-  const extrusionHeight = useStore((state) => state.extrusionHeight);
-  const setExtrusionHeight = useStore((state) => state.setExtrusionHeight);
   const selectionMode = useStore((state) => state.selectionMode);
   const setSelectionMode = useStore((state) => state.setSelectionMode);
   const shapeData = useStore((state) => state.shapeData);
@@ -124,40 +122,6 @@ export function Toolbar() {
             Face {(sketchPlane as { faceIndex: number }).faceIndex}
           </span>
         )}
-      </div>
-
-      <div
-        style={{
-          width: '1px',
-          height: '24px',
-          backgroundColor: '#313244',
-        }}
-      />
-
-      {/* Extrusion Height */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-        <label style={{ color: '#a6adc8', fontSize: '13px' }}>
-          Extrude:
-        </label>
-        <input
-          type="number"
-          value={extrusionHeight}
-          onChange={(e) => {
-            const value = parseFloat(e.target.value);
-            if (!isNaN(value) && value > 0) {
-              setExtrusionHeight(value);
-            }
-          }}
-          style={{
-            width: '50px',
-            padding: '5px 8px',
-            border: '1px solid #313244',
-            borderRadius: '4px',
-            backgroundColor: '#1e1e2e',
-            color: '#cdd6f4',
-            fontSize: '13px',
-          }}
-        />
       </div>
 
       {/* 3D Selection (only show when shape exists) */}

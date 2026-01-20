@@ -15,11 +15,15 @@ export interface FacePlane {
 
 export type SketchPlane = StandardPlane | FacePlane;
 
+// Operation type for sketch elements
+export type OperationType = 'extrude' | 'cut';
+
 // Base interface for all sketch elements
 export interface SketchElementBase {
   id: string;
   plane: SketchPlane;
   selected: boolean;
+  operation: OperationType;
 }
 
 // Rectangle: defined by two corner points

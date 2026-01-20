@@ -8,6 +8,7 @@ import type {
   ArcElement,
   SplineElement,
   SketchPlane,
+  OperationType,
 } from '../types';
 
 /**
@@ -95,6 +96,7 @@ function parseRectangles(code: string, defaultPlane: SketchPlane, elements: Sket
       },
       selected: false,
       plane,
+      operation: 'extrude' as OperationType,
     };
 
     elements.push(rect);
@@ -145,6 +147,7 @@ function parseCircles(code: string, defaultPlane: SketchPlane, elements: SketchE
       radius,
       selected: false,
       plane,
+      operation: 'extrude' as OperationType,
     };
 
     elements.push(circle);
@@ -184,6 +187,7 @@ function parseLines(code: string, defaultPlane: SketchPlane, elements: SketchEle
       end: { x: startX + dx, y: startY + dy },
       selected: false,
       plane,
+      operation: 'extrude' as OperationType,
     };
 
     elements.push(line);
@@ -222,6 +226,7 @@ function parseHLines(code: string, defaultPlane: SketchPlane, elements: SketchEl
       length,
       selected: false,
       plane,
+      operation: 'extrude' as OperationType,
     };
 
     elements.push(hline);
@@ -260,6 +265,7 @@ function parseVLines(code: string, defaultPlane: SketchPlane, elements: SketchEl
       length,
       selected: false,
       plane,
+      operation: 'extrude' as OperationType,
     };
 
     elements.push(vline);
@@ -319,6 +325,7 @@ function parseArcs(code: string, defaultPlane: SketchPlane, elements: SketchElem
       endAngle,
       selected: false,
       plane,
+      operation: 'extrude' as OperationType,
     };
 
     elements.push(arc);
@@ -369,6 +376,7 @@ function parseSplines(code: string, defaultPlane: SketchPlane, elements: SketchE
         points,
         selected: false,
         plane,
+        operation: 'extrude' as OperationType,
       };
 
       elements.push(spline);
