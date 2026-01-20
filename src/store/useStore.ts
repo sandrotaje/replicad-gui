@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Rectangle, MeshData } from '../types';
+import type { Rectangle, MeshData, ShapeData, SelectionMode } from '../types';
 import { parseRectanglesFromCode, parseExtrusionHeightFromCode } from '../utils/codeParser';
 
 type UpdateSource = 'sketch' | 'code' | null;
@@ -15,8 +15,16 @@ interface AppState {
 
   // 3D state
   meshData: MeshData | null;
+  shapeData: ShapeData | null;
   isEvaluating: boolean;
   error: string | null;
+
+  // 3D Selection state
+  selectionMode: SelectionMode;
+  selectedFaceIndices: Set<number>;
+  selectedEdgeIndices: Set<number>;
+  hoveredFaceIndex: number | null;
+  hoveredEdgeIndex: number | null;
 
   // Extrusion state
   extrusionHeight: number;
@@ -39,9 +47,18 @@ interface AppState {
   updateFromCode: (code: string) => void;
 
   setMeshData: (meshData: MeshData | null) => void;
+  setShapeData: (shapeData: ShapeData | null) => void;
   setIsEvaluating: (isEvaluating: boolean) => void;
   setError: (error: string | null) => void;
   setExtrusionHeight: (height: number) => void;
+
+  // 3D Selection actions
+  setSelectionMode: (mode: SelectionMode) => void;
+  selectFace: (index: number, multiSelect?: boolean) => void;
+  selectEdge: (index: number, multiSelect?: boolean) => void;
+  setHoveredFace: (index: number | null) => void;
+  setHoveredEdge: (index: number | null) => void;
+  clearSelection: () => void;
 }
 
 function generateReplicadCode(rectangles: Rectangle[], extrusionHeight: number): string {
@@ -90,8 +107,16 @@ function main() {
 `,
 
   meshData: null,
+  shapeData: null,
   isEvaluating: false,
   error: null,
+
+  // 3D Selection state
+  selectionMode: 'none',
+  selectedFaceIndices: new Set(),
+  selectedEdgeIndices: new Set(),
+  hoveredFaceIndex: null,
+  hoveredEdgeIndex: null,
 
   extrusionHeight: 10,
   lastUpdateSource: null,
@@ -190,6 +215,15 @@ function main() {
   },
 
   setMeshData: (meshData) => set({ meshData }),
+  setShapeData: (shapeData) => set({
+    shapeData,
+    meshData: shapeData?.mesh ?? null,
+    // Clear selection when shape changes
+    selectedFaceIndices: new Set(),
+    selectedEdgeIndices: new Set(),
+    hoveredFaceIndex: null,
+    hoveredEdgeIndex: null,
+  }),
   setIsEvaluating: (isEvaluating) => set({ isEvaluating }),
   setError: (error) => set({ error }),
 
@@ -202,4 +236,54 @@ function main() {
       lastUpdateSource: 'sketch',
     });
   },
+
+  // 3D Selection actions
+  setSelectionMode: (mode) => set({
+    selectionMode: mode,
+    // Clear selection when mode changes
+    selectedFaceIndices: new Set(),
+    selectedEdgeIndices: new Set(),
+    hoveredFaceIndex: null,
+    hoveredEdgeIndex: null,
+  }),
+
+  selectFace: (index, multiSelect = false) => set((state) => {
+    if (state.selectionMode !== 'face') return state;
+    const newSelectedFaces = multiSelect
+      ? new Set(state.selectedFaceIndices)
+      : new Set<number>();
+
+    if (state.selectedFaceIndices.has(index) && multiSelect) {
+      newSelectedFaces.delete(index);
+    } else {
+      newSelectedFaces.add(index);
+    }
+
+    return { selectedFaceIndices: newSelectedFaces };
+  }),
+
+  selectEdge: (index, multiSelect = false) => set((state) => {
+    if (state.selectionMode !== 'edge') return state;
+    const newSelectedEdges = multiSelect
+      ? new Set(state.selectedEdgeIndices)
+      : new Set<number>();
+
+    if (state.selectedEdgeIndices.has(index) && multiSelect) {
+      newSelectedEdges.delete(index);
+    } else {
+      newSelectedEdges.add(index);
+    }
+
+    return { selectedEdgeIndices: newSelectedEdges };
+  }),
+
+  setHoveredFace: (index) => set({ hoveredFaceIndex: index }),
+  setHoveredEdge: (index) => set({ hoveredEdgeIndex: index }),
+
+  clearSelection: () => set({
+    selectedFaceIndices: new Set(),
+    selectedEdgeIndices: new Set(),
+    hoveredFaceIndex: null,
+    hoveredEdgeIndex: null,
+  }),
 }));

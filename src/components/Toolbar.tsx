@@ -6,6 +6,9 @@ export function Toolbar() {
   const rectangles = useStore((state) => state.rectangles);
   const extrusionHeight = useStore((state) => state.extrusionHeight);
   const setExtrusionHeight = useStore((state) => state.setExtrusionHeight);
+  const selectionMode = useStore((state) => state.selectionMode);
+  const setSelectionMode = useStore((state) => state.setSelectionMode);
+  const shapeData = useStore((state) => state.shapeData);
 
   const buttonStyle = (isActive: boolean) => ({
     padding: '8px 16px',
@@ -16,6 +19,18 @@ export function Toolbar() {
     fontSize: '13px',
     transition: 'all 0.2s',
     backgroundColor: isActive ? '#89b4fa' : '#313244',
+    color: isActive ? '#1e1e2e' : '#cdd6f4',
+  });
+
+  const smallButtonStyle = (isActive: boolean) => ({
+    padding: '6px 12px',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontWeight: 500,
+    fontSize: '12px',
+    transition: 'all 0.2s',
+    backgroundColor: isActive ? '#a6e3a1' : '#313244',
     color: isActive ? '#1e1e2e' : '#cdd6f4',
   });
 
@@ -79,6 +94,38 @@ export function Toolbar() {
           }}
         />
       </div>
+
+      {shapeData && (
+        <>
+          <div
+            style={{
+              width: '1px',
+              height: '24px',
+              backgroundColor: '#313244',
+            }}
+          />
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <label style={{ color: '#a6adc8', fontSize: '13px' }}>
+              3D Select:
+            </label>
+            <button
+              style={smallButtonStyle(selectionMode === 'face')}
+              onClick={() => setSelectionMode(selectionMode === 'face' ? 'none' : 'face')}
+              title="Select Faces (F)"
+            >
+              Face
+            </button>
+            <button
+              style={smallButtonStyle(selectionMode === 'edge')}
+              onClick={() => setSelectionMode(selectionMode === 'edge' ? 'none' : 'edge')}
+              title="Select Edges (E)"
+            >
+              Edge
+            </button>
+          </div>
+        </>
+      )}
 
       <div style={{ flex: 1 }} />
 
