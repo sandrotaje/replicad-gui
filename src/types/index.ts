@@ -8,9 +8,6 @@ export type StandardPlane = 'XY' | 'XZ' | 'YZ';
 export interface FacePlane {
   type: 'face';
   faceIndex: number;
-  origin: [number, number, number];
-  xDir: [number, number, number];
-  normal: [number, number, number];
 }
 
 export type SketchPlane = StandardPlane | FacePlane;
