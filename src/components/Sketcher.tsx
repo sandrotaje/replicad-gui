@@ -1,6 +1,6 @@
-import { useRef, useEffect, useState, useCallback } from 'react';
-import { useStore } from '../store/useStore';
-import type { Point, Rectangle } from '../types';
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import { useStore, planesEqual } from '../store/useStore';
+import type { Point } from '../types';
 
 const GRID_SIZE = 10;
 
@@ -22,6 +22,19 @@ export function Sketcher() {
   const addRectangle = useStore((state) => state.addRectangle);
   const selectRectangle = useStore((state) => state.selectRectangle);
   const deselectAll = useStore((state) => state.deselectAll);
+  const sketchPlane = useStore((state) => state.sketchPlane);
+
+  // Filter rectangles by current plane
+  const currentPlaneRectangles = useMemo(() =>
+    rectangles.filter(r => planesEqual(r.plane, sketchPlane)),
+    [rectangles, sketchPlane]
+  );
+
+  // Rectangles on other planes (shown dimmed)
+  const otherPlaneRectangles = useMemo(() =>
+    rectangles.filter(r => !planesEqual(r.plane, sketchPlane)),
+    [rectangles, sketchPlane]
+  );
 
   const screenToWorld = useCallback((screenX: number, screenY: number): Point => {
     const canvas = canvasRef.current;
@@ -98,8 +111,26 @@ export function Sketcher() {
     ctx.lineTo(origin.x, canvas.height);
     ctx.stroke();
 
-    // Draw rectangles
-    rectangles.forEach((rect) => {
+    // Draw rectangles from other planes (dimmed)
+    otherPlaneRectangles.forEach((rect) => {
+      const start = worldToScreen(rect.start.x, rect.start.y);
+      const end = worldToScreen(rect.end.x, rect.end.y);
+
+      const width = end.x - start.x;
+      const height = end.y - start.y;
+
+      ctx.fillStyle = 'rgba(88, 91, 112, 0.15)';
+      ctx.fillRect(start.x, start.y, width, height);
+
+      ctx.strokeStyle = '#585b70';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.strokeRect(start.x, start.y, width, height);
+      ctx.setLineDash([]);
+    });
+
+    // Draw rectangles on current plane
+    currentPlaneRectangles.forEach((rect) => {
       const start = worldToScreen(rect.start.x, rect.start.y);
       const end = worldToScreen(rect.end.x, rect.end.y);
 
@@ -144,7 +175,7 @@ export function Sketcher() {
     ctx.beginPath();
     ctx.arc(origin.x, origin.y, 5, 0, Math.PI * 2);
     ctx.fill();
-  }, [rectangles, isDrawing, startPoint, currentPoint, worldToScreen, scale]);
+  }, [currentPlaneRectangles, otherPlaneRectangles, isDrawing, startPoint, currentPoint, worldToScreen, scale]);
 
   useEffect(() => {
     const updateSize = () => {
@@ -174,8 +205,8 @@ export function Sketcher() {
       setStartPoint(point);
       setCurrentPoint(point);
     } else if (currentTool === 'select') {
-      // Check if clicking on a rectangle
-      const clickedRect = rectangles.find((rect) => {
+      // Only allow selecting rectangles on the current plane
+      const clickedRect = currentPlaneRectangles.find((rect) => {
         const minX = Math.min(rect.start.x, rect.end.x);
         const maxX = Math.max(rect.start.x, rect.end.x);
         const minY = Math.min(rect.start.y, rect.end.y);
@@ -204,7 +235,8 @@ export function Sketcher() {
       const height = Math.abs(currentPoint.y - startPoint.y);
 
       if (width > 0 && height > 0) {
-        const newRect: Rectangle = {
+        // Don't include plane - it will be added by addRectangle from current sketchPlane
+        addRectangle({
           id: crypto.randomUUID(),
           start: {
             x: Math.min(startPoint.x, currentPoint.x),
@@ -215,8 +247,7 @@ export function Sketcher() {
             y: Math.max(startPoint.y, currentPoint.y),
           },
           selected: false,
-        };
-        addRectangle(newRect);
+        });
       }
     }
 

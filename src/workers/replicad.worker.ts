@@ -36,7 +36,8 @@ function evaluateCode(code: string) {
       drawPolysides,
       makeBox,
       makeCylinder,
-      makeSphere
+      makeSphere,
+      Plane
     } = replicad;
 
     ${code}
@@ -150,6 +151,12 @@ function extractShapeData(shape: unknown) {
     vertices: Float32Array;
     normals: Float32Array;
     triangles: Uint32Array;
+    isPlanar?: boolean;
+    plane?: {
+      origin: [number, number, number];
+      xDir: [number, number, number];
+      normal: [number, number, number];
+    };
   }> = [];
 
   // Always mesh individual faces for selection support
@@ -161,6 +168,11 @@ function extractShapeData(shape: unknown) {
         normals: number[];
         triangles: number[];
       };
+      geomType?: string;
+      center?: { x: number; y: number; z: number };
+      normalAt?: (point?: { x: number; y: number; z: number }) => { x: number; y: number; z: number };
+      UVBox?: [number, number, number, number];
+      pointOnSurface?: (u: number, v: number) => { x: number; y: number; z: number };
     }>;
 
     faces.forEach((face, index) => {
@@ -173,11 +185,73 @@ function extractShapeData(shape: unknown) {
             normals: faceMesh.normals?.length,
             triangles: faceMesh.triangles?.length,
           });
+
+          // Check if the face is planar and extract plane info
+          let isPlanar = false;
+          let plane: { origin: [number, number, number]; xDir: [number, number, number]; normal: [number, number, number] } | undefined;
+
+          try {
+            // Check geometry type - "PLANE" indicates a planar face
+            const geomType = face.geomType;
+            console.log('[Worker] Face', index, 'geomType:', geomType);
+
+            if (geomType === 'PLANE') {
+              isPlanar = true;
+
+              const center = face.center;
+              if (center) {
+                // Get the normal at the center
+                let normal: [number, number, number] = [0, 0, 1];
+                if (typeof face.normalAt === 'function') {
+                  const normalVec = face.normalAt(center);
+                  normal = [normalVec.x, normalVec.y, normalVec.z];
+                }
+
+                // Calculate origin as world origin (0,0,0) projected onto the plane
+                // This makes sketch coordinates match world XY coordinates better
+                // For plane N·(X-P)=0, projecting origin: origin_proj = N * (N·P)
+                const ndotp = normal[0] * center.x + normal[1] * center.y + normal[2] * center.z;
+                const origin: [number, number, number] = [
+                  normal[0] * ndotp,
+                  normal[1] * ndotp,
+                  normal[2] * ndotp,
+                ];
+
+                // Calculate xDir (perpendicular to normal)
+                // Use a reference vector to compute xDir
+                let refVec: [number, number, number] = [1, 0, 0];
+                // If normal is parallel to X axis, use Y as reference
+                if (Math.abs(normal[0]) > 0.9) {
+                  refVec = [0, 1, 0];
+                }
+
+                // xDir = normalize(refVec - (refVec . normal) * normal)
+                const dot = refVec[0] * normal[0] + refVec[1] * normal[1] + refVec[2] * normal[2];
+                let xDir: [number, number, number] = [
+                  refVec[0] - dot * normal[0],
+                  refVec[1] - dot * normal[1],
+                  refVec[2] - dot * normal[2],
+                ];
+                const len = Math.sqrt(xDir[0] ** 2 + xDir[1] ** 2 + xDir[2] ** 2);
+                if (len > 0.0001) {
+                  xDir = [xDir[0] / len, xDir[1] / len, xDir[2] / len];
+                }
+
+                plane = { origin, xDir, normal };
+                console.log('[Worker] Face', index, 'plane info:', plane);
+              }
+            }
+          } catch (planeError) {
+            console.warn('[Worker] Failed to extract plane info for face', index, planeError);
+          }
+
           individualFaces.push({
             faceIndex: index,
             vertices: new Float32Array(faceMesh.vertices),
             normals: new Float32Array(faceMesh.normals),
             triangles: new Uint32Array(faceMesh.triangles),
+            isPlanar,
+            plane,
           });
         }
       } catch (e) {

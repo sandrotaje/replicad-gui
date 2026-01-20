@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Rectangle, MeshData, ShapeData, SelectionMode } from '../types';
+import type { Rectangle, MeshData, ShapeData, SelectionMode, SketchPlane, FacePlane } from '../types';
 import { parseRectanglesFromCode, parseExtrusionHeightFromCode } from '../utils/codeParser';
 
 type UpdateSource = 'sketch' | 'code' | null;
@@ -29,11 +29,14 @@ interface AppState {
   // Extrusion state
   extrusionHeight: number;
 
+  // Sketch plane state (current plane for new rectangles)
+  sketchPlane: SketchPlane;
+
   // Sync tracking (to prevent infinite loops)
   lastUpdateSource: UpdateSource;
 
   // Actions
-  addRectangle: (rect: Rectangle) => void;
+  addRectangle: (rect: Omit<Rectangle, 'plane'>) => void;
   updateRectangle: (id: string, updates: Partial<Rectangle>) => void;
   removeRectangle: (id: string) => void;
   selectRectangle: (id: string, multiSelect?: boolean) => void;
@@ -52,6 +55,10 @@ interface AppState {
   setError: (error: string | null) => void;
   setExtrusionHeight: (height: number) => void;
 
+  // Sketch plane actions
+  setSketchPlane: (plane: SketchPlane) => void;
+  sketchOnFace: (faceIndex: number) => void;
+
   // 3D Selection actions
   setSelectionMode: (mode: SelectionMode) => void;
   selectFace: (index: number, multiSelect?: boolean) => void;
@@ -59,6 +66,25 @@ interface AppState {
   setHoveredFace: (index: number | null) => void;
   setHoveredEdge: (index: number | null) => void;
   clearSelection: () => void;
+}
+
+// Helper to get a unique key for a plane (for grouping)
+function getPlaneKey(plane: SketchPlane): string {
+  if (typeof plane === 'string') {
+    return plane;
+  }
+  return `face_${plane.faceIndex}`;
+}
+
+// Helper to check if two planes are the same
+function planesEqual(a: SketchPlane, b: SketchPlane): boolean {
+  if (typeof a === 'string' && typeof b === 'string') {
+    return a === b;
+  }
+  if (typeof a === 'object' && typeof b === 'object') {
+    return a.faceIndex === b.faceIndex;
+  }
+  return false;
 }
 
 function generateReplicadCode(rectangles: Rectangle[], extrusionHeight: number): string {
@@ -70,26 +96,100 @@ function main() {
 `;
   }
 
-  const rectCode = rectangles.map((rect, index) => {
-    const width = Math.abs(rect.end.x - rect.start.x);
-    const height = Math.abs(rect.end.y - rect.start.y);
-    const centerX = (rect.start.x + rect.end.x) / 2;
-    const centerY = (rect.start.y + rect.end.y) / 2;
+  // Group rectangles by their plane
+  const planeGroups = new Map<string, { plane: SketchPlane; rects: Rectangle[] }>();
 
-    return `  // Rectangle ${index + 1}
-  const rect${index + 1} = drawRectangle(${width.toFixed(2)}, ${height.toFixed(2)})
-    .sketchOnPlane("XY")
+  for (const rect of rectangles) {
+    const key = getPlaneKey(rect.plane);
+    if (!planeGroups.has(key)) {
+      planeGroups.set(key, { plane: rect.plane, rects: [] });
+    }
+    planeGroups.get(key)!.rects.push(rect);
+  }
+
+  const allShapeNames: string[] = [];
+  const codeBlocks: string[] = [];
+  let shapeCounter = 1;
+
+  // Generate code for each plane group
+  for (const [, { plane, rects }] of planeGroups) {
+    const isStandardPlane = typeof plane === 'string';
+
+    // Generate plane definition for face planes
+    let planeVarName = '';
+    if (!isStandardPlane) {
+      const facePlane = plane as FacePlane;
+      planeVarName = `facePlane${facePlane.faceIndex}`;
+      codeBlocks.push(`  // Plane for face ${facePlane.faceIndex}
+  const ${planeVarName} = new Plane(
+    [${facePlane.origin.map(n => n.toFixed(4)).join(', ')}],
+    [${facePlane.xDir.map(n => n.toFixed(4)).join(', ')}],
+    [${facePlane.normal.map(n => n.toFixed(4)).join(', ')}]
+  );`);
+    }
+
+    for (const rect of rects) {
+      const shapeName = `shape${shapeCounter}`;
+      allShapeNames.push(shapeName);
+
+      const width = Math.abs(rect.end.x - rect.start.x);
+      const height = Math.abs(rect.end.y - rect.start.y);
+      const centerX = (rect.start.x + rect.end.x) / 2;
+      const centerY = (rect.start.y + rect.end.y) / 2;
+
+      if (isStandardPlane) {
+        const standardPlane = plane as string;
+        const translateOffset = standardPlane === 'XY' ? `[${centerX.toFixed(2)}, ${centerY.toFixed(2)}, 0]`
+          : standardPlane === 'XZ' ? `[${centerX.toFixed(2)}, 0, ${centerY.toFixed(2)}]`
+          : `[0, ${centerX.toFixed(2)}, ${centerY.toFixed(2)}]`;
+
+        codeBlocks.push(`  // Shape ${shapeCounter} on ${standardPlane} plane
+  const ${shapeName} = drawRectangle(${width.toFixed(2)}, ${height.toFixed(2)})
+    .sketchOnPlane("${standardPlane}")
     .extrude(${extrusionHeight})
-    .translate([${centerX.toFixed(2)}, ${centerY.toFixed(2)}, 0]);`;
-  }).join('\n\n');
+    .translate(${translateOffset});`);
+      } else {
+        // For face planes, sketchOnPlane(plane) already positions the sketch at the plane's origin
+        // So the translation should only include the local offset within the plane, not the origin
+        const facePlane = plane as FacePlane;
+        const [dx, dy, dz] = facePlane.xDir;
+        const [nx, ny, nz] = facePlane.normal;
+        // Calculate Y direction as cross product of normal and xDir
+        const yDirX = ny * dz - nz * dy;
+        const yDirY = nz * dx - nx * dz;
+        const yDirZ = nx * dy - ny * dx;
 
-  const fuseCode = rectangles.length > 1
-    ? `\n\n  // Combine all shapes\n  let result = rect1;\n${rectangles.slice(1).map((_, i) => `  result = result.fuse(rect${i + 2});`).join('\n')}\n  return result;`
-    : `\n\n  return rect1;`;
+        // Translate only by the local offset (plane origin is already handled by sketchOnPlane)
+        const translateX = centerX * dx + centerY * yDirX;
+        const translateY = centerX * dy + centerY * yDirY;
+        const translateZ = centerX * dz + centerY * yDirZ;
 
-  return `// Available: drawRectangle, drawCircle, drawRoundedRectangle, draw, makeBox, etc.
+        codeBlocks.push(`  // Shape ${shapeCounter} on face ${facePlane.faceIndex}
+  const ${shapeName} = drawRectangle(${width.toFixed(2)}, ${height.toFixed(2)})
+    .sketchOnPlane(${planeVarName})
+    .extrude(${extrusionHeight})
+    .translate([${translateX.toFixed(2)}, ${translateY.toFixed(2)}, ${translateZ.toFixed(2)}]);`);
+      }
+
+      shapeCounter++;
+    }
+  }
+
+  // Combine all shapes
+  let fuseCode: string;
+  if (allShapeNames.length === 1) {
+    fuseCode = `\n  return ${allShapeNames[0]};`;
+  } else {
+    fuseCode = `\n  // Combine all shapes
+  let result = ${allShapeNames[0]};
+${allShapeNames.slice(1).map(name => `  result = result.fuse(${name});`).join('\n')}
+  return result;`;
+  }
+
+  return `// Available: drawRectangle, drawCircle, drawRoundedRectangle, draw, makeBox, Plane, etc.
 function main() {
-${rectCode}${fuseCode}
+${codeBlocks.join('\n\n')}
+${fuseCode}
 }
 `;
 }
@@ -119,12 +219,15 @@ function main() {
   hoveredEdgeIndex: null,
 
   extrusionHeight: 10,
+  sketchPlane: 'XY' as SketchPlane,
   lastUpdateSource: null,
 
   // Actions
   addRectangle: (rect) => {
     const state = get();
-    const newRectangles = [...state.rectangles, rect];
+    // Add the current sketchPlane to the rectangle
+    const newRect: Rectangle = { ...rect, plane: state.sketchPlane };
+    const newRectangles = [...state.rectangles, newRect];
     const code = generateReplicadCode(newRectangles, state.extrusionHeight);
     set({
       rectangles: newRectangles,
@@ -202,7 +305,8 @@ function main() {
 
   // Update from code changes
   updateFromCode: (code) => {
-    const rectangles = parseRectanglesFromCode(code);
+    const state = get();
+    const rectangles = parseRectanglesFromCode(code, state.sketchPlane);
     const extrusionHeight = parseExtrusionHeightFromCode(code);
 
     set({
@@ -234,6 +338,38 @@ function main() {
       extrusionHeight: height,
       code,
       lastUpdateSource: 'sketch',
+    });
+  },
+
+  // Sketch plane actions
+  setSketchPlane: (plane) => {
+    // Just change the active plane for new rectangles, don't regenerate code
+    set({ sketchPlane: plane });
+  },
+
+  sketchOnFace: (faceIndex) => {
+    const state = get();
+    const face = state.shapeData?.individualFaces.find(f => f.faceIndex === faceIndex);
+    if (!face || !face.isPlanar || !face.plane) {
+      console.warn('Cannot sketch on non-planar face or face without plane info');
+      return;
+    }
+
+    const facePlane: FacePlane = {
+      type: 'face',
+      faceIndex,
+      origin: face.plane.origin,
+      xDir: face.plane.xDir,
+      normal: face.plane.normal,
+    };
+
+    // Just set the new plane as active - existing rectangles keep their planes
+    set({
+      sketchPlane: facePlane,
+      // Clear 3D selection
+      selectionMode: 'none',
+      selectedFaceIndices: new Set(),
+      selectedEdgeIndices: new Set(),
     });
   },
 
@@ -287,3 +423,6 @@ function main() {
     hoveredEdgeIndex: null,
   }),
 }));
+
+// Export helpers for use elsewhere
+export { planesEqual, getPlaneKey };
