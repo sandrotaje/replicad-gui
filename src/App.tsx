@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Sketcher, CodeEditor, Viewer3D, Toolbar } from './components';
+import { Sketcher, CodeEditor, Viewer3D, Toolbar, SketchList } from './components';
 import './App.css';
 
 type ViewMode = 'split' | 'sketcher' | '3d';
@@ -42,6 +42,7 @@ function App() {
       </div>
 
       <div className="main-content">
+        <SketchList />
         <div className={`views-container ${viewMode}`}>
           {(viewMode === 'split' || viewMode === 'sketcher') && (
             <div className="view-panel sketcher-panel">
