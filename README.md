@@ -1,73 +1,82 @@
-# React + TypeScript + Vite
+# Replicad GUI
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+> A modern, web-based CAD editor combining visual sketching with code-driven 3D modeling
 
-Currently, two official plugins are available:
+**Replicad GUI** is an intuitive parametric CAD application that brings the power of [Replicad](https://replicad.xyz) to your browser. Design complex 3D models through an elegant combination of 2D sketching, visual tools, and JavaScript/TypeScript code.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## ✨ Features
 
-## React Compiler
+- **🎨 2D Sketcher** - Create precise sketches with comprehensive drawing tools and dimension editing
+- **🔮 Real-time 3D Preview** - See your designs come to life instantly with interactive 3D rendering
+- **💻 Code Editor** - Write parametric models in JavaScript/TypeScript with Monaco editor (VS Code experience)
+- **🔄 Multiple View Modes** - Switch seamlessly between split view, sketcher-only, or 3D-only layouts
+- **⚡ Extrusion & Cut Operations** - Transform 2D sketches into 3D solids with powerful modeling operations
+- **📐 Parametric Design** - Create intelligent models that adapt to changing parameters
+- **🎯 Sketch Management** - Organize multiple sketches on different planes for complex designs
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## 🚀 Getting Started
 
-## Expanding the ESLint configuration
+### Prerequisites
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- Node.js 18+ and npm
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+### Installation
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+```bash
+# Clone the repository
+git clone https://github.com/sandrotaje/replicad-gui.git
+cd replicad-gui
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+# Install dependencies
+npm install
+
+# Start the development server
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Visit `http://localhost:5173` to start designing!
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## 🎯 Usage
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+1. **Start Sketching** - Use the 2D sketcher to draw your design with lines, arcs, and curves
+2. **Add Dimensions** - Define precise measurements and constraints
+3. **Extrude to 3D** - Transform your sketch into a 3D solid with extrusion controls
+4. **Refine with Code** - Use the code editor to add parametric logic and complex operations
+5. **Preview & Iterate** - Watch your model update in real-time as you make changes
+
+## 🛠️ Tech Stack
+
+- **React 19** - Modern UI framework
+- **TypeScript** - Type-safe development
+- **Replicad** - Powerful CAD kernel powered by OpenCascade
+- **Three.js** - 3D rendering engine
+- **Monaco Editor** - Professional code editing experience
+- **Vite** - Lightning-fast build tool
+
+## 📦 Build
+
+```bash
+# Build for production
+npm run build
+
+# Preview production build
+npm run preview
 ```
+
+## 🤝 Contributing
+
+Contributions are welcome! Feel free to open issues or submit pull requests.
+
+## 📄 License
+
+This project is open source and available under the MIT License.
+
+## 🔗 Resources
+
+- [Replicad Documentation](https://replicad.xyz/docs)
+- [Replicad Examples](https://replicad.xyz/examples)
+- [Live Demo](https://sandrotaje.github.io/replicad-gui/)
+
+---
+
+Built with ❤️ using [Replicad](https://replicad.xyz)
