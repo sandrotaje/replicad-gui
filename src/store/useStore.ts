@@ -207,38 +207,20 @@ function moveElementByDelta(element: SketchElement, delta: Point): SketchElement
 // Generate code for a single element
 function generateElementCode(
   element: SketchElement,
-  shapeName: string,
-  extrusionHeight: number,
-  planeVarName: string | null
+  extrusionHeight: number
 ): string {
   const isStandardPlane = typeof element.plane === 'string';
   const standardPlane = isStandardPlane ? (element.plane as string) : null;
+  const facePlane = !isStandardPlane ? (element.plane as FacePlane) : null;
 
-  // For cut operations, extrude in the negative direction (into the shape)
-  const actualExtrusionHeight = element.operation === 'cut' ? -extrusionHeight : extrusionHeight;
-
-  const getTranslateOffset = (centerX: number, centerY: number): string => {
+  // Get the sketch method - either sketchOnPlane or sketchOnFace
+  const getSketchMethod = (offsetX: number = 0, offsetY: number = 0): string => {
     if (isStandardPlane) {
-      return standardPlane === 'XY'
-        ? `[${centerX.toFixed(2)}, ${centerY.toFixed(2)}, 0]`
-        : standardPlane === 'XZ'
-          ? `[${centerX.toFixed(2)}, 0, ${centerY.toFixed(2)}]`
-          : `[0, ${centerX.toFixed(2)}, ${centerY.toFixed(2)}]`;
+      return `.sketchOnPlane("${standardPlane}")`;
     } else {
-      const facePlane = element.plane as FacePlane;
-      const [dx, dy, dz] = facePlane.xDir;
-      const [nx, ny, nz] = facePlane.normal;
-      const yDirX = ny * dz - nz * dy;
-      const yDirY = nz * dx - nx * dz;
-      const yDirZ = nx * dy - ny * dx;
-      const translateX = centerX * dx + centerY * yDirX;
-      const translateY = centerX * dy + centerY * yDirY;
-      const translateZ = centerX * dz + centerY * yDirZ;
-      return `[${translateX.toFixed(2)}, ${translateY.toFixed(2)}, ${translateZ.toFixed(2)}]`;
+      return `.sketchOnFace(result, ${facePlane!.faceIndex}, ${offsetX.toFixed(2)}, ${offsetY.toFixed(2)})`;
     }
   };
-
-  const planeArg = isStandardPlane ? `"${standardPlane}"` : planeVarName;
 
   switch (element.type) {
     case 'rectangle': {
@@ -246,18 +228,12 @@ function generateElementCode(
       const height = Math.abs(element.end.y - element.start.y);
       const centerX = (element.start.x + element.end.x) / 2;
       const centerY = (element.start.y + element.end.y) / 2;
-      return `  const ${shapeName} = drawRectangle(${width.toFixed(2)}, ${height.toFixed(2)})
-    .sketchOnPlane(${planeArg})
-    .extrude(${actualExtrusionHeight})
-    .translate(${getTranslateOffset(centerX, centerY)});`;
+      return `drawRectangle(${width.toFixed(2)}, ${height.toFixed(2)})${getSketchMethod(centerX, centerY)}.extrude(${extrusionHeight.toFixed(2)})`;
     }
 
     case 'circle': {
       const { center, radius } = element;
-      return `  const ${shapeName} = drawCircle(${radius.toFixed(2)})
-    .sketchOnPlane(${planeArg})
-    .extrude(${actualExtrusionHeight})
-    .translate(${getTranslateOffset(center.x, center.y)});`;
+      return `drawCircle(${radius.toFixed(2)})${getSketchMethod(center.x, center.y)}.extrude(${extrusionHeight.toFixed(2)})`;
     }
 
     case 'line': {
@@ -265,29 +241,17 @@ function generateElementCode(
       const { start, end } = element;
       const dx = end.x - start.x;
       const dy = end.y - start.y;
-      return `  // Line from (${start.x.toFixed(2)}, ${start.y.toFixed(2)}) to (${end.x.toFixed(2)}, ${end.y.toFixed(2)})
-  const ${shapeName} = draw([${start.x.toFixed(2)}, ${start.y.toFixed(2)}])
-    .line(${dx.toFixed(2)}, ${dy.toFixed(2)})
-    .done()
-    .sketchOnPlane(${planeArg});`;
+      return `draw([${start.x.toFixed(2)}, ${start.y.toFixed(2)}]).line(${dx.toFixed(2)}, ${dy.toFixed(2)}).done()${getSketchMethod()}`;
     }
 
     case 'hline': {
       const { start, length } = element;
-      return `  // Horizontal line from (${start.x.toFixed(2)}, ${start.y.toFixed(2)}), length ${length.toFixed(2)}
-  const ${shapeName} = draw([${start.x.toFixed(2)}, ${start.y.toFixed(2)}])
-    .hLine(${length.toFixed(2)})
-    .done()
-    .sketchOnPlane(${planeArg});`;
+      return `draw([${start.x.toFixed(2)}, ${start.y.toFixed(2)}]).hLine(${length.toFixed(2)}).done()${getSketchMethod()}`;
     }
 
     case 'vline': {
       const { start, length } = element;
-      return `  // Vertical line from (${start.x.toFixed(2)}, ${start.y.toFixed(2)}), length ${length.toFixed(2)}
-  const ${shapeName} = draw([${start.x.toFixed(2)}, ${start.y.toFixed(2)}])
-    .vLine(${length.toFixed(2)})
-    .done()
-    .sketchOnPlane(${planeArg});`;
+      return `draw([${start.x.toFixed(2)}, ${start.y.toFixed(2)}]).vLine(${length.toFixed(2)}).done()${getSketchMethod()}`;
     }
 
     case 'arc': {
@@ -296,29 +260,19 @@ function generateElementCode(
       const startY = center.y + radius * Math.sin(startAngle);
       const endX = center.x + radius * Math.cos(endAngle);
       const endY = center.y + radius * Math.sin(endAngle);
-      // Use three-point arc: start, middle, end
       const midAngle = (startAngle + endAngle) / 2;
       const midX = center.x + radius * Math.cos(midAngle);
       const midY = center.y + radius * Math.sin(midAngle);
-      return `  // Arc centered at (${center.x.toFixed(2)}, ${center.y.toFixed(2)}), radius ${radius.toFixed(2)}
-  const ${shapeName} = draw([${startX.toFixed(2)}, ${startY.toFixed(2)}])
-    .threePointsArcTo([${endX.toFixed(2)}, ${endY.toFixed(2)}], [${midX.toFixed(2)}, ${midY.toFixed(2)}])
-    .done()
-    .sketchOnPlane(${planeArg});`;
+      return `draw([${startX.toFixed(2)}, ${startY.toFixed(2)}]).threePointsArcTo([${endX.toFixed(2)}, ${endY.toFixed(2)}], [${midX.toFixed(2)}, ${midY.toFixed(2)}]).done()${getSketchMethod()}`;
     }
 
     case 'spline': {
       if (element.points.length < 2) {
-        return `  // Spline with insufficient points
-  const ${shapeName} = null;`;
+        return `null // Spline with insufficient points`;
       }
       const [first, ...rest] = element.points;
       const splinePoints = rest.map((p) => `[${p.x.toFixed(2)}, ${p.y.toFixed(2)}]`).join(', ');
-      return `  // Spline through ${element.points.length} points
-  const ${shapeName} = draw([${first.x.toFixed(2)}, ${first.y.toFixed(2)}])
-    .smoothSplineTo(${splinePoints})
-    .done()
-    .sketchOnPlane(${planeArg});`;
+      return `draw([${first.x.toFixed(2)}, ${first.y.toFixed(2)}]).smoothSplineTo(${splinePoints}).done()${getSketchMethod()}`;
     }
   }
 }
@@ -335,93 +289,48 @@ function main() {
 `;
   }
 
-  // Group elements by their plane
-  const planeGroups = new Map<string, { plane: SketchPlane; elems: SketchElement[] }>();
-
-  for (const elem of elements) {
-    const key = getPlaneKey(elem.plane);
-    if (!planeGroups.has(key)) {
-      planeGroups.set(key, { plane: elem.plane, elems: [] });
-    }
-    planeGroups.get(key)!.elems.push(elem);
-  }
-
-  const extrudeShapeNames: string[] = [];
-  const cutShapeNames: string[] = [];
-  const codeBlocks: string[] = [];
-  let shapeCounter = 1;
-
-  // Generate code for each plane group
-  for (const [, { plane, elems }] of planeGroups) {
-    const isStandardPlane = typeof plane === 'string';
-
-    // Generate plane definition for face planes
-    let planeVarName: string | null = null;
-    if (!isStandardPlane) {
-      const facePlane = plane as FacePlane;
-      planeVarName = `facePlane${facePlane.faceIndex}`;
-      codeBlocks.push(`  // Plane for face ${facePlane.faceIndex}
-  const ${planeVarName} = new Plane(
-    [${facePlane.origin.map((n) => n.toFixed(4)).join(', ')}],
-    [${facePlane.xDir.map((n) => n.toFixed(4)).join(', ')}],
-    [${facePlane.normal.map((n) => n.toFixed(4)).join(', ')}]
-  );`);
-    }
-
-    for (const elem of elems) {
-      const shapeName = `shape${shapeCounter}`;
-
-      // Only add extrudable shapes to the appropriate list based on element's operation
-      const isExtrudable = elem.type === 'rectangle' || elem.type === 'circle';
-      if (isExtrudable) {
-        if (elem.operation === 'cut') {
-          cutShapeNames.push(shapeName);
-        } else {
-          extrudeShapeNames.push(shapeName);
-        }
-      }
-
-      const elemCode = generateElementCode(elem, shapeName, extrusionHeight, planeVarName);
-      codeBlocks.push(elemCode);
-      shapeCounter++;
-    }
-  }
-
-  // Combine all extrudable shapes, then apply cuts
-  let combineCode: string;
-  if (extrudeShapeNames.length === 0 && cutShapeNames.length === 0) {
-    combineCode = `\n  return null; // No extrudable shapes`;
-  } else if (extrudeShapeNames.length === 0) {
-    // Only cut shapes, nothing to cut from
-    combineCode = `\n  return null; // No base shapes to cut from`;
-  } else if (extrudeShapeNames.length === 1 && cutShapeNames.length === 0) {
-    combineCode = `\n  return ${extrudeShapeNames[0]};`;
-  } else {
-    const lines: string[] = [];
-    lines.push(`\n  // Combine all shapes`);
-    lines.push(`  let result = ${extrudeShapeNames[0]};`);
-
-    // Fuse extrude shapes
-    for (let i = 1; i < extrudeShapeNames.length; i++) {
-      lines.push(`  result = result.fuse(${extrudeShapeNames[i]});`);
-    }
-
-    // Apply cuts
-    if (cutShapeNames.length > 0) {
-      lines.push(`\n  // Apply cuts`);
-      for (const cutName of cutShapeNames) {
-        lines.push(`  result = result.cut(${cutName});`);
-      }
-    }
-
-    lines.push(`  return result;`);
-    combineCode = lines.join('\n');
-  }
-
-  return `// Available: drawRectangle, drawCircle, drawRoundedRectangle, draw, makeBox, Plane, etc.
+  // Validate: First element must be on a standard plane
+  const firstElement = elements[0];
+  if (typeof firstElement.plane !== 'string') {
+    return `// ERROR: First element must be on a standard plane (XY, XZ, or YZ)
 function main() {
-${codeBlocks.join('\n\n')}
-${combineCode}
+  return null;
+}
+`;
+  }
+
+  const lines: string[] = [];
+
+  // Generate first element - this creates the initial result
+  const firstCode = generateElementCode(firstElement, extrusionHeight);
+  lines.push(`  let result = ${firstCode};`);
+
+  // Process remaining elements sequentially
+  for (let i = 1; i < elements.length; i++) {
+    const elem = elements[i];
+    const elemCode = generateElementCode(elem, extrusionHeight);
+
+    // Skip non-extrudable shapes for now
+    const isExtrudable = elem.type === 'rectangle' || elem.type === 'circle';
+    if (!isExtrudable) {
+      lines.push(`  // Skipping non-extrudable element: ${elem.type}`);
+      continue;
+    }
+
+    if (elem.operation === 'cut') {
+      lines.push(`\n  // Cut operation`);
+      lines.push(`  result = result.cut(${elemCode});`);
+    } else {
+      lines.push(`\n  // Fuse operation`);
+      lines.push(`  result = result.fuse(${elemCode});`);
+    }
+  }
+
+  lines.push(`\n  return result;`);
+
+  return `// Sequential shape building using sketchOnFace
+function main() {
+${lines.join('\n')}
 }
 `;
 }
@@ -620,17 +529,14 @@ function main() {
   sketchOnFace: (faceIndex) => {
     const state = get();
     const face = state.shapeData?.individualFaces.find((f) => f.faceIndex === faceIndex);
-    if (!face || !face.isPlanar || !face.plane) {
-      console.warn('Cannot sketch on non-planar face or face without plane info');
+    if (!face || !face.isPlanar) {
+      console.warn('Cannot sketch on non-planar face');
       return;
     }
 
     const facePlane: FacePlane = {
       type: 'face',
       faceIndex,
-      origin: face.plane.origin,
-      xDir: face.plane.xDir,
-      normal: face.plane.normal,
     };
 
     // Just set the new plane as active - existing elements keep their planes
