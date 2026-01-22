@@ -21,6 +21,8 @@ export interface SketchElementBase {
   plane: SketchPlane;
   selected: boolean;
   operation: OperationType;
+  committed: boolean; // When true, element is extruded; when false, it's just a 2D sketch
+  depth: number; // Extrusion depth for this element (set when committed)
 }
 
 // Rectangle: defined by two corner points
