@@ -1,7 +1,13 @@
 import { useStore } from '../store/useStore';
 import type { StandardPlane, SketchTool } from '../types';
 
-export function Toolbar() {
+interface ToolbarProps {
+  isMobile?: boolean;
+  toolsOpen?: boolean;
+  setToolsOpen?: (open: boolean) => void;
+}
+
+export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: ToolbarProps) {
   const currentTool = useStore((state) => state.currentTool);
   const setCurrentTool = useStore((state) => state.setCurrentTool);
   const elements = useStore((state) => state.elements);
@@ -29,7 +35,7 @@ export function Toolbar() {
     border: 'none',
     borderRadius: '6px',
     cursor: 'pointer',
-    fontWeight: 500,
+    fontWeight: 500 as const,
     fontSize: '13px',
     transition: 'all 0.2s',
     backgroundColor: isActive ? '#89b4fa' : '#313244',
@@ -41,7 +47,7 @@ export function Toolbar() {
     border: 'none',
     borderRadius: '4px',
     cursor: 'pointer',
-    fontWeight: 500,
+    fontWeight: 500 as const,
     fontSize: '12px',
     transition: 'all 0.2s',
     backgroundColor: isActive ? '#a6e3a1' : '#313244',
@@ -68,18 +74,126 @@ export function Toolbar() {
 
   const totalElements = elements.length;
 
-  return (
-    <div
-      style={{
+  const handleToolSelect = (tool: SketchTool) => {
+    setCurrentTool(tool);
+    if (isMobile && setToolsOpen) {
+      setToolsOpen(false);
+    }
+  };
+
+  // Mobile tools drawer
+  const renderMobileToolsDrawer = () => (
+    <div className={`toolbar-tools-drawer ${toolsOpen ? 'mobile-open' : ''}`}>
+      <div style={{
         display: 'flex',
+        justifyContent: 'space-between',
         alignItems: 'center',
-        gap: '12px',
-        padding: '10px 16px',
-        backgroundColor: '#181825',
-        borderBottom: '1px solid #313244',
-        flexWrap: 'wrap',
-      }}
-    >
+        marginBottom: '16px'
+      }}>
+        <span style={{ fontWeight: 500, fontSize: '16px' }}>Tools</span>
+        <button
+          onClick={() => setToolsOpen?.(false)}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: '#cdd6f4',
+            fontSize: '18px',
+            cursor: 'pointer',
+            padding: '4px 8px'
+          }}
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="tool-section">
+        <span className="section-label">Drawing Tools</span>
+        {tools.map(({ tool, icon, label, title }) => (
+          <button
+            key={tool}
+            style={{
+              ...buttonStyle(currentTool === tool),
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+            }}
+            onClick={() => handleToolSelect(tool)}
+            title={title}
+          >
+            <span style={{ fontSize: '16px' }}>{icon}</span>
+            <span>{label}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="tool-section">
+        <span className="section-label">Sketch Plane</span>
+        {(['XY', 'XZ', 'YZ'] as StandardPlane[]).map((plane) => (
+          <button
+            key={plane}
+            style={smallButtonStyle(currentStandardPlane === plane)}
+            onClick={() => setSketchPlane(plane)}
+            title={`Sketch on ${plane} plane`}
+          >
+            {plane} Plane
+          </button>
+        ))}
+        {!isStandardPlane && (
+          <span style={{ color: '#f9e2af', fontSize: '12px', fontStyle: 'italic', padding: '8px' }}>
+            Currently: Face {(sketchPlane as { faceIndex: number }).faceIndex}
+          </span>
+        )}
+      </div>
+
+      {shapeData && (
+        <div className="tool-section">
+          <span className="section-label">3D Selection</span>
+          <button
+            style={smallButtonStyle(selectionMode === 'face')}
+            onClick={() => setSelectionMode(selectionMode === 'face' ? 'none' : 'face')}
+            title="Select Faces (F)"
+          >
+            Select Faces
+          </button>
+          <button
+            style={smallButtonStyle(selectionMode === 'edge')}
+            onClick={() => setSelectionMode(selectionMode === 'edge' ? 'none' : 'edge')}
+            title="Select Edges (E)"
+          >
+            Select Edges
+          </button>
+          {selectedPlanarFace && (
+            <button
+              style={{
+                padding: '12px 16px',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: 500,
+                fontSize: '12px',
+                backgroundColor: '#f9e2af',
+                color: '#1e1e2e',
+              }}
+              onClick={() => sketchOnFace(selectedPlanarFace.faceIndex)}
+              title="Sketch on selected face"
+            >
+              Sketch on Face
+            </button>
+          )}
+        </div>
+      )}
+
+      <div style={{ marginTop: 'auto', paddingTop: '16px', borderTop: '1px solid #313244' }}>
+        <span style={{ color: '#6c7086', fontSize: '12px' }}>
+          {totalElements} element{totalElements !== 1 ? 's' : ''}
+        </span>
+      </div>
+    </div>
+  );
+
+  // Desktop toolbar
+  const renderDesktopToolbar = () => (
+    <div className="toolbar-desktop" style={{ display: 'flex', gap: '12px', flex: 1, alignItems: 'center' }}>
       {/* Drawing Tools */}
       <div style={{ display: 'flex', gap: '4px' }}>
         {tools.map(({ tool, icon, label, title }) => (
@@ -189,5 +303,84 @@ export function Toolbar() {
         )}
       </span>
     </div>
+  );
+
+  // Mobile toolbar
+  const renderMobileToolbar = () => (
+    <div className="toolbar-mobile" style={{ display: 'flex', gap: '8px', flex: 1, alignItems: 'center' }}>
+      <button
+        className="mobile-menu-btn"
+        onClick={() => setToolsOpen?.(!toolsOpen)}
+        style={{
+          padding: '8px 12px',
+          border: 'none',
+          borderRadius: '6px',
+          backgroundColor: toolsOpen ? '#89b4fa' : '#313244',
+          color: toolsOpen ? '#1e1e2e' : '#cdd6f4',
+          fontSize: '16px',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+        }}
+      >
+        ☰ Tools
+      </button>
+
+      {/* Current tool indicator */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        padding: '6px 12px',
+        backgroundColor: '#313244',
+        borderRadius: '6px',
+        fontSize: '13px',
+      }}>
+        <span style={{ color: '#89b4fa' }}>
+          {tools.find(t => t.tool === currentTool)?.icon}
+        </span>
+        <span style={{ color: '#cdd6f4' }}>
+          {tools.find(t => t.tool === currentTool)?.label}
+        </span>
+      </div>
+
+      {/* Quick plane indicator */}
+      <div style={{
+        padding: '6px 10px',
+        backgroundColor: '#313244',
+        borderRadius: '6px',
+        fontSize: '12px',
+        color: '#a6e3a1',
+      }}>
+        {isStandardPlane ? currentStandardPlane : `Face ${(sketchPlane as { faceIndex: number }).faceIndex}`}
+      </div>
+
+      <div style={{ flex: 1 }} />
+
+      {/* Element count (compact) */}
+      <span style={{ color: '#6c7086', fontSize: '11px' }}>
+        {totalElements} elem
+      </span>
+    </div>
+  );
+
+  return (
+    <>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          padding: '10px 16px',
+          backgroundColor: '#181825',
+          borderBottom: '1px solid #313244',
+          flexWrap: 'wrap',
+        }}
+      >
+        {isMobile ? renderMobileToolbar() : renderDesktopToolbar()}
+      </div>
+      {isMobile && renderMobileToolsDrawer()}
+    </>
   );
 }
