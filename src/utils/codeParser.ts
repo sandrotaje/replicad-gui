@@ -97,6 +97,8 @@ function parseRectangles(code: string, defaultPlane: SketchPlane, elements: Sket
       selected: false,
       plane,
       operation: 'extrude' as OperationType,
+      committed: true, // Parsed from code, already committed
+      depth: 10, // Default depth for parsed elements
     };
 
     elements.push(rect);
@@ -148,6 +150,8 @@ function parseCircles(code: string, defaultPlane: SketchPlane, elements: SketchE
       selected: false,
       plane,
       operation: 'extrude' as OperationType,
+      committed: true, // Parsed from code, already committed
+      depth: 10, // Default depth for parsed elements
     };
 
     elements.push(circle);
@@ -188,6 +192,8 @@ function parseLines(code: string, defaultPlane: SketchPlane, elements: SketchEle
       selected: false,
       plane,
       operation: 'extrude' as OperationType,
+      committed: true, // Parsed from code, already committed
+      depth: 10, // Default depth for parsed elements
     };
 
     elements.push(line);
@@ -227,6 +233,8 @@ function parseHLines(code: string, defaultPlane: SketchPlane, elements: SketchEl
       selected: false,
       plane,
       operation: 'extrude' as OperationType,
+      committed: true, // Parsed from code, already committed
+      depth: 10, // Default depth for parsed elements
     };
 
     elements.push(hline);
@@ -266,6 +274,8 @@ function parseVLines(code: string, defaultPlane: SketchPlane, elements: SketchEl
       selected: false,
       plane,
       operation: 'extrude' as OperationType,
+      committed: true, // Parsed from code, already committed
+      depth: 10, // Default depth for parsed elements
     };
 
     elements.push(vline);
@@ -326,6 +336,8 @@ function parseArcs(code: string, defaultPlane: SketchPlane, elements: SketchElem
       selected: false,
       plane,
       operation: 'extrude' as OperationType,
+      committed: true, // Parsed from code, already committed
+      depth: 10, // Default depth for parsed elements
     };
 
     elements.push(arc);
@@ -377,6 +389,8 @@ function parseSplines(code: string, defaultPlane: SketchPlane, elements: SketchE
         selected: false,
         plane,
         operation: 'extrude' as OperationType,
+      committed: true, // Parsed from code, already committed
+      depth: 10, // Default depth for parsed elements
       };
 
       elements.push(spline);

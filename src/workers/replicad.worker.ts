@@ -40,6 +40,18 @@ function evaluateCode(code: string) {
       Plane
     } = replicad;
 
+    // Helper function to sketch on a face with offset positioning
+    // Usage: sketchOnFace(drawing, shape, faceIndex, offsetX, offsetY)
+    function sketchOnFace(drawing, shape, faceIndex, offsetX = 0, offsetY = 0) {
+      const face = shape.faces[faceIndex];
+      if (!face) {
+        throw new Error('Face not found at index ' + faceIndex);
+      }
+      // Translate the 2D drawing by the offset before sketching on the face
+      const translatedDrawing = drawing.translate(offsetX, offsetY);
+      return translatedDrawing.sketchOnFace(face, "original");
+    }
+
     ${code}
 
     return main();

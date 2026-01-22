@@ -67,14 +67,16 @@ export function Sketcher() {
   const selectElement = useStore((state) => state.selectElement);
   const deselectAll = useStore((state) => state.deselectAll);
   const sketchPlane = useStore((state) => state.sketchPlane);
-  const extrusionHeight = useStore((state) => state.extrusionHeight);
-  const setExtrusionHeight = useStore((state) => state.setExtrusionHeight);
+  const planeDepths = useStore((state) => state.planeDepths);
+  const defaultDepth = useStore((state) => state.defaultDepth);
+  const setPlaneDepth = useStore((state) => state.setPlaneDepth);
   const planeOperations = useStore((state) => state.planeOperations);
   const setPlaneOperation = useStore((state) => state.setPlaneOperation);
 
-  // Get current plane's operation type
+  // Get current plane's operation type and depth
   const currentPlaneKey = getPlaneKey(sketchPlane);
   const currentOperation = planeOperations.get(currentPlaneKey) || 'extrude';
+  const currentDepth = planeDepths.get(currentPlaneKey) ?? defaultDepth;
 
   // Filter elements by current plane
   const currentPlaneElements = useMemo(
@@ -1546,11 +1548,11 @@ export function Sketcher() {
           <input
             type="number"
             inputMode="decimal"
-            value={extrusionHeight}
+            value={currentDepth}
             onChange={(e) => {
               const value = parseFloat(e.target.value);
               if (!isNaN(value) && value > 0) {
-                setExtrusionHeight(value);
+                setPlaneDepth(currentPlaneKey, value);
               }
             }}
             style={{

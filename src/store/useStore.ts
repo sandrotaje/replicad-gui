@@ -11,19 +11,20 @@ import type {
   Point,
   OperationType,
 } from '../types';
-import { parseElementsFromCode, parseExtrusionHeightFromCode } from '../utils/codeParser';
+import { parseElementsFromCode } from '../utils/codeParser';
 
 // Re-export OperationType for convenience
 export type { OperationType } from '../types';
 
 // Type for adding elements - uses discriminated union properly
-type NewElement = Omit<RectangleElement, 'plane' | 'selected' | 'operation'> |
-  Omit<SketchElement & { type: 'circle' }, 'plane' | 'selected' | 'operation'> |
-  Omit<SketchElement & { type: 'line' }, 'plane' | 'selected' | 'operation'> |
-  Omit<SketchElement & { type: 'hline' }, 'plane' | 'selected' | 'operation'> |
-  Omit<SketchElement & { type: 'vline' }, 'plane' | 'selected' | 'operation'> |
-  Omit<SketchElement & { type: 'arc' }, 'plane' | 'selected' | 'operation'> |
-  Omit<SketchElement & { type: 'spline' }, 'plane' | 'selected' | 'operation'>;
+// Excludes plane, selected, operation, committed, and depth since those are set by addElement
+type NewElement = Omit<RectangleElement, 'plane' | 'selected' | 'operation' | 'committed' | 'depth'> |
+  Omit<SketchElement & { type: 'circle' }, 'plane' | 'selected' | 'operation' | 'committed' | 'depth'> |
+  Omit<SketchElement & { type: 'line' }, 'plane' | 'selected' | 'operation' | 'committed' | 'depth'> |
+  Omit<SketchElement & { type: 'hline' }, 'plane' | 'selected' | 'operation' | 'committed' | 'depth'> |
+  Omit<SketchElement & { type: 'vline' }, 'plane' | 'selected' | 'operation' | 'committed' | 'depth'> |
+  Omit<SketchElement & { type: 'arc' }, 'plane' | 'selected' | 'operation' | 'committed' | 'depth'> |
+  Omit<SketchElement & { type: 'spline' }, 'plane' | 'selected' | 'operation' | 'committed' | 'depth'>;
 
 type UpdateSource = 'sketch' | 'code' | null;
 
@@ -49,8 +50,9 @@ interface AppState {
   hoveredFaceIndex: number | null;
   hoveredEdgeIndex: number | null;
 
-  // Extrusion state
-  extrusionHeight: number;
+  // Extrusion state (per-plane)
+  planeDepths: Map<string, number>; // Depth for each plane
+  defaultDepth: number; // Default depth for new planes
 
   // Operation type per plane (extrude or cut)
   planeOperations: Map<string, OperationType>;
@@ -71,7 +73,7 @@ interface AppState {
   setCurrentTool: (tool: SketchTool) => void;
 
   // Updates from sketch (will regenerate code)
-  updateFromSketch: (elements: SketchElement[], extrusionHeight?: number) => void;
+  updateFromSketch: (elements: SketchElement[]) => void;
 
   // Updates from code (will update sketch)
   updateFromCode: (code: string) => void;
@@ -80,7 +82,8 @@ interface AppState {
   setShapeData: (shapeData: ShapeData | null) => void;
   setIsEvaluating: (isEvaluating: boolean) => void;
   setError: (error: string | null) => void;
-  setExtrusionHeight: (height: number) => void;
+  setPlaneDepth: (planeKey: string, depth: number) => void;
+  getCurrentPlaneDepth: () => number;
 
   // Sketch plane actions
   setSketchPlane: (plane: SketchPlane) => void;
@@ -205,21 +208,36 @@ function moveElementByDelta(element: SketchElement, delta: Point): SketchElement
 }
 
 // Generate code for a single element
+// Uses element.depth for extrusion height (stored when element was committed)
 function generateElementCode(
   element: SketchElement,
-  extrusionHeight: number
+  shouldExtrude: boolean = true
 ): string {
   const isStandardPlane = typeof element.plane === 'string';
   const standardPlane = isStandardPlane ? (element.plane as string) : null;
   const facePlane = !isStandardPlane ? (element.plane as FacePlane) : null;
 
-  // Get the sketch method - either sketchOnPlane or sketchOnFace
-  const getSketchMethod = (offsetX: number = 0, offsetY: number = 0): string => {
+  // For cuts on faces, extrude in negative direction (into the solid)
+  const isCutOnFace = !isStandardPlane && element.operation === 'cut';
+  const effectiveHeight = isCutOnFace ? -element.depth : element.depth;
+
+  // Helper to wrap drawing code with sketch method
+  // For standard planes: drawX(...).sketchOnPlane("XY")
+  // For face planes: sketchOnFace(drawX(...), result, faceIndex, offsetX, offsetY)
+  const wrapWithSketch = (drawingCode: string, offsetX: number = 0, offsetY: number = 0): string => {
     if (isStandardPlane) {
-      return `.sketchOnPlane("${standardPlane}")`;
+      return `${drawingCode}.sketchOnPlane("${standardPlane}")`;
     } else {
-      return `.sketchOnFace(result, ${facePlane!.faceIndex}, ${offsetX.toFixed(2)}, ${offsetY.toFixed(2)})`;
+      return `sketchOnFace(${drawingCode}, result, ${facePlane!.faceIndex}, ${offsetX.toFixed(2)}, ${offsetY.toFixed(2)})`;
     }
+  };
+
+  // Helper to add extrusion if needed
+  const maybeExtrude = (sketchCode: string): string => {
+    if (shouldExtrude) {
+      return `${sketchCode}.extrude(${effectiveHeight.toFixed(2)})`;
+    }
+    return sketchCode;
   };
 
   switch (element.type) {
@@ -228,12 +246,14 @@ function generateElementCode(
       const height = Math.abs(element.end.y - element.start.y);
       const centerX = (element.start.x + element.end.x) / 2;
       const centerY = (element.start.y + element.end.y) / 2;
-      return `drawRectangle(${width.toFixed(2)}, ${height.toFixed(2)})${getSketchMethod(centerX, centerY)}.extrude(${extrusionHeight.toFixed(2)})`;
+      const drawing = `drawRectangle(${width.toFixed(2)}, ${height.toFixed(2)})`;
+      return maybeExtrude(wrapWithSketch(drawing, centerX, centerY));
     }
 
     case 'circle': {
       const { center, radius } = element;
-      return `drawCircle(${radius.toFixed(2)})${getSketchMethod(center.x, center.y)}.extrude(${extrusionHeight.toFixed(2)})`;
+      const drawing = `drawCircle(${radius.toFixed(2)})`;
+      return maybeExtrude(wrapWithSketch(drawing, center.x, center.y));
     }
 
     case 'line': {
@@ -241,17 +261,20 @@ function generateElementCode(
       const { start, end } = element;
       const dx = end.x - start.x;
       const dy = end.y - start.y;
-      return `draw([${start.x.toFixed(2)}, ${start.y.toFixed(2)}]).line(${dx.toFixed(2)}, ${dy.toFixed(2)}).done()${getSketchMethod()}`;
+      const drawing = `draw([${start.x.toFixed(2)}, ${start.y.toFixed(2)}]).line(${dx.toFixed(2)}, ${dy.toFixed(2)}).done()`;
+      return wrapWithSketch(drawing);
     }
 
     case 'hline': {
       const { start, length } = element;
-      return `draw([${start.x.toFixed(2)}, ${start.y.toFixed(2)}]).hLine(${length.toFixed(2)}).done()${getSketchMethod()}`;
+      const drawing = `draw([${start.x.toFixed(2)}, ${start.y.toFixed(2)}]).hLine(${length.toFixed(2)}).done()`;
+      return wrapWithSketch(drawing);
     }
 
     case 'vline': {
       const { start, length } = element;
-      return `draw([${start.x.toFixed(2)}, ${start.y.toFixed(2)}]).vLine(${length.toFixed(2)}).done()${getSketchMethod()}`;
+      const drawing = `draw([${start.x.toFixed(2)}, ${start.y.toFixed(2)}]).vLine(${length.toFixed(2)}).done()`;
+      return wrapWithSketch(drawing);
     }
 
     case 'arc': {
@@ -263,7 +286,8 @@ function generateElementCode(
       const midAngle = (startAngle + endAngle) / 2;
       const midX = center.x + radius * Math.cos(midAngle);
       const midY = center.y + radius * Math.sin(midAngle);
-      return `draw([${startX.toFixed(2)}, ${startY.toFixed(2)}]).threePointsArcTo([${endX.toFixed(2)}, ${endY.toFixed(2)}], [${midX.toFixed(2)}, ${midY.toFixed(2)}]).done()${getSketchMethod()}`;
+      const drawing = `draw([${startX.toFixed(2)}, ${startY.toFixed(2)}]).threePointsArcTo([${endX.toFixed(2)}, ${endY.toFixed(2)}], [${midX.toFixed(2)}, ${midY.toFixed(2)}]).done()`;
+      return wrapWithSketch(drawing);
     }
 
     case 'spline': {
@@ -272,15 +296,13 @@ function generateElementCode(
       }
       const [first, ...rest] = element.points;
       const splinePoints = rest.map((p) => `[${p.x.toFixed(2)}, ${p.y.toFixed(2)}]`).join(', ');
-      return `draw([${first.x.toFixed(2)}, ${first.y.toFixed(2)}]).smoothSplineTo(${splinePoints}).done()${getSketchMethod()}`;
+      const drawing = `draw([${first.x.toFixed(2)}, ${first.y.toFixed(2)}]).smoothSplineTo(${splinePoints}).done()`;
+      return wrapWithSketch(drawing);
     }
   }
 }
 
-function generateReplicadCode(
-  elements: SketchElement[],
-  extrusionHeight: number
-): string {
+function generateReplicadCode(elements: SketchElement[]): string {
   if (elements.length === 0) {
     return `// Draw shapes on the sketcher
 function main() {
@@ -289,8 +311,20 @@ function main() {
 `;
   }
 
-  // Validate: First element must be on a standard plane
-  const firstElement = elements[0];
+  // Filter to only committed elements for 3D generation
+  const committedElements = elements.filter((e) => e.committed);
+
+  if (committedElements.length === 0) {
+    // No committed elements yet - show message but don't generate 3D
+    return `// Draw shapes on the sketcher, then click Extrude or Cut to commit
+function main() {
+  return null;
+}
+`;
+  }
+
+  // Validate: First committed element must be on a standard plane
+  const firstElement = committedElements[0];
   if (typeof firstElement.plane !== 'string') {
     return `// ERROR: First element must be on a standard plane (XY, XZ, or YZ)
 function main() {
@@ -301,14 +335,15 @@ function main() {
 
   const lines: string[] = [];
 
-  // Generate first element - this creates the initial result
-  const firstCode = generateElementCode(firstElement, extrusionHeight);
+  // Generate first element - this creates the initial result (always extruded)
+  // Each element uses its own depth stored when committed
+  const firstCode = generateElementCode(firstElement, true);
   lines.push(`  let result = ${firstCode};`);
 
-  // Process remaining elements sequentially
-  for (let i = 1; i < elements.length; i++) {
-    const elem = elements[i];
-    const elemCode = generateElementCode(elem, extrusionHeight);
+  // Process remaining committed elements sequentially
+  for (let i = 1; i < committedElements.length; i++) {
+    const elem = committedElements[i];
+    const elemCode = generateElementCode(elem, true);
 
     // Skip non-extrudable shapes for now
     const isExtrudable = elem.type === 'rectangle' || elem.type === 'circle';
@@ -359,7 +394,8 @@ function main() {
   hoveredFaceIndex: null,
   hoveredEdgeIndex: null,
 
-  extrusionHeight: 10,
+  planeDepths: new Map<string, number>(),
+  defaultDepth: 10,
   planeOperations: new Map<string, OperationType>(),
   sketchPlane: 'XY' as SketchPlane,
   lastUpdateSource: null,
@@ -377,14 +413,17 @@ function main() {
     const state = get();
     const planeKey = getPlaneKey(state.sketchPlane);
     const operation = state.planeOperations.get(planeKey) || 'extrude';
+    const depth = state.planeDepths.get(planeKey) ?? state.defaultDepth;
     const newElement = {
       ...elemWithoutPlane,
       plane: state.sketchPlane,
       selected: false,
       operation,
+      committed: false, // New elements start as uncommitted (2D sketch only)
+      depth, // Store current plane's depth (will be used when committed)
     } as SketchElement;
     const newElements = [...state.elements, newElement];
-    const code = generateReplicadCode(newElements, state.extrusionHeight);
+    const code = generateReplicadCode(newElements);
     set({
       elements: newElements,
       code,
@@ -401,7 +440,7 @@ function main() {
       }
       return e;
     });
-    const code = generateReplicadCode(newElements, state.extrusionHeight);
+    const code = generateReplicadCode(newElements);
     set({
       elements: newElements,
       code,
@@ -414,7 +453,7 @@ function main() {
     const newElements = state.elements.map((e) =>
       e.id === id ? moveElementByDelta(e, delta) : e
     );
-    const code = generateReplicadCode(newElements, state.extrusionHeight);
+    const code = generateReplicadCode(newElements);
     set({
       elements: newElements,
       code,
@@ -427,7 +466,7 @@ function main() {
     const newElements = state.elements.filter((e) => e.id !== id);
     const newSelectedIds = new Set(state.selectedElementIds);
     newSelectedIds.delete(id);
-    const code = generateReplicadCode(newElements, state.extrusionHeight);
+    const code = generateReplicadCode(newElements);
     set({
       elements: newElements,
       selectedElementIds: newSelectedIds,
@@ -469,13 +508,10 @@ function main() {
   setCurrentTool: (tool) => set({ currentTool: tool }),
 
   // Update from sketch changes
-  updateFromSketch: (elements, extrusionHeight) => {
-    const state = get();
-    const newExtrusionHeight = extrusionHeight ?? state.extrusionHeight;
-    const code = generateReplicadCode(elements, newExtrusionHeight);
+  updateFromSketch: (elements) => {
+    const code = generateReplicadCode(elements);
     set({
       elements,
-      extrusionHeight: newExtrusionHeight,
       code,
       lastUpdateSource: 'sketch',
     });
@@ -485,13 +521,11 @@ function main() {
   updateFromCode: (code) => {
     const state = get();
     const elements = parseElementsFromCode(code, state.sketchPlane);
-    const extrusionHeight = parseExtrusionHeightFromCode(code);
 
     set({
       code,
       elements,
       selectedElementIds: new Set(),
-      ...(extrusionHeight !== null ? { extrusionHeight } : {}),
       lastUpdateSource: 'code',
     });
   },
@@ -510,14 +544,32 @@ function main() {
   setIsEvaluating: (isEvaluating) => set({ isEvaluating }),
   setError: (error) => set({ error }),
 
-  setExtrusionHeight: (height) => {
+  setPlaneDepth: (planeKey, depth) => {
     const state = get();
-    const code = generateReplicadCode(state.elements, height);
+    const newPlaneDepths = new Map(state.planeDepths);
+    newPlaneDepths.set(planeKey, depth);
+    // Update depth for ALL elements on this plane (committed or not)
+    // This allows real-time depth adjustment
+    const newElements = state.elements.map((e) => {
+      if (getPlaneKey(e.plane) === planeKey) {
+        return { ...e, depth } as typeof e;
+      }
+      return e;
+    });
+    // Regenerate code with new depths
+    const code = generateReplicadCode(newElements);
     set({
-      extrusionHeight: height,
+      planeDepths: newPlaneDepths,
+      elements: newElements,
       code,
       lastUpdateSource: 'sketch',
     });
+  },
+
+  getCurrentPlaneDepth: () => {
+    const state = get();
+    const planeKey = getPlaneKey(state.sketchPlane);
+    return state.planeDepths.get(planeKey) ?? state.defaultDepth;
   },
 
   // Sketch plane actions
@@ -553,14 +605,18 @@ function main() {
     const state = get();
     const newPlaneOperations = new Map(state.planeOperations);
     newPlaneOperations.set(planeKey, operation);
-    // Update all elements on this plane to use the new operation
+    // Get the current depth for this plane
+    const depth = state.planeDepths.get(planeKey) ?? state.defaultDepth;
+    // Update all uncommitted elements on this plane: set operation, depth, and commit them
     const newElements = state.elements.map((e) => {
-      if (getPlaneKey(e.plane) === planeKey) {
-        return { ...e, operation } as typeof e;
+      if (getPlaneKey(e.plane) === planeKey && !e.committed) {
+        // Mark as committed when user explicitly clicks extrude/cut
+        // Use the current plane's depth
+        return { ...e, operation, depth, committed: true } as typeof e;
       }
       return e;
     });
-    const code = generateReplicadCode(newElements, state.extrusionHeight);
+    const code = generateReplicadCode(newElements);
     set({
       planeOperations: newPlaneOperations,
       elements: newElements,
@@ -634,15 +690,18 @@ function main() {
     const state = get();
     const planeKey = getPlaneKey(state.sketchPlane);
     const operation = state.planeOperations.get(planeKey) || 'extrude';
+    const depth = state.planeDepths.get(planeKey) ?? state.defaultDepth;
     const newElement: RectangleElement = {
       ...rect,
       type: 'rectangle',
       plane: state.sketchPlane,
       selected: false,
       operation,
+      committed: false, // New elements start uncommitted
+      depth,
     };
     const newElements = [...state.elements, newElement];
-    const code = generateReplicadCode(newElements, state.extrusionHeight);
+    const code = generateReplicadCode(newElements);
     set({
       elements: newElements,
       code,
@@ -655,7 +714,7 @@ function main() {
     const newElements = state.elements.map((e) =>
       e.id === id && e.type === 'rectangle' ? { ...e, ...updates } : e
     );
-    const code = generateReplicadCode(newElements, state.extrusionHeight);
+    const code = generateReplicadCode(newElements);
     set({
       elements: newElements,
       code,
