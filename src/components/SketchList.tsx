@@ -6,6 +6,10 @@ interface SketchGroup {
   elements: SketchElement[];
 }
 
+interface SketchListProps {
+  hideMobileHeader?: boolean;
+}
+
 function getPlaneName(plane: SketchPlane): string {
   if (typeof plane === 'string') {
     return `${plane} Plane`;
@@ -27,7 +31,7 @@ function getElementSummary(elements: SketchElement[]): string {
   return parts.join(', ');
 }
 
-export function SketchList() {
+export function SketchList({ hideMobileHeader = false }: SketchListProps) {
   const elements = useStore((state) => state.elements);
   const sketchPlane = useStore((state) => state.sketchPlane);
   const setSketchPlane = useStore((state) => state.setSketchPlane);
@@ -50,7 +54,7 @@ export function SketchList() {
   if (sketchGroups.length === 0) {
     return (
       <div className="sketch-list">
-        <div className="sketch-list-header">Sketches</div>
+        {!hideMobileHeader && <div className="sketch-list-header">Sketches</div>}
         <div className="sketch-list-empty">
           No sketches yet. Draw shapes on the canvas to create sketches.
         </div>
@@ -60,7 +64,7 @@ export function SketchList() {
 
   return (
     <div className="sketch-list">
-      <div className="sketch-list-header">Sketches</div>
+      {!hideMobileHeader && <div className="sketch-list-header">Sketches</div>}
       <div className="sketch-list-items">
         {sketchGroups.map((group) => {
           const isActive = planesEqual(group.plane, sketchPlane);
