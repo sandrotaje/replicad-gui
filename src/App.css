@@ -205,3 +205,292 @@
 .monaco-editor {
   position: absolute !important;
 }
+
+/* Mobile drawer backdrop */
+.mobile-backdrop {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  z-index: 90;
+}
+
+.mobile-backdrop.visible {
+  display: block;
+}
+
+/* Mobile sketch list drawer */
+.sketch-list-drawer {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .sketch-list-drawer {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: 0;
+    left: -100%;
+    width: 280px;
+    max-width: 80vw;
+    height: 100vh;
+    background-color: #181825;
+    z-index: 100;
+    transition: left 0.3s ease;
+    box-shadow: 2px 0 10px rgba(0, 0, 0, 0.3);
+  }
+
+  .sketch-list-drawer.mobile-open {
+    left: 0;
+  }
+
+  .sketch-list-drawer .sketch-list {
+    width: 100%;
+    border-right: none;
+  }
+}
+
+/* Mobile hamburger button */
+.mobile-menu-btn {
+  display: none;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background-color: #313244;
+  color: #cdd6f4;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+/* Mobile drawer toggle buttons */
+.mobile-drawer-toggle {
+  display: none;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background-color: #313244;
+  color: #cdd6f4;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* Toolbar overflow menu for mobile */
+.toolbar-tools-drawer {
+  display: flex;
+  gap: 4px;
+}
+
+/* Mobile Responsive Styles */
+@media (max-width: 768px) {
+  /* Hide split view option on mobile */
+  .view-tabs button[data-view="split"] {
+    display: none;
+  }
+
+  /* Stack view controls */
+  .view-controls {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .view-tabs {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .view-tabs button {
+    flex: 1;
+    padding: 8px 6px;
+    font-size: 11px;
+  }
+
+  /* Hide sidebars by default on mobile */
+  .sketch-list {
+    position: fixed;
+    top: 0;
+    left: -100%;
+    width: 280px;
+    max-width: 80vw;
+    height: 100vh;
+    z-index: 100;
+    transition: left 0.3s ease;
+    box-shadow: 2px 0 10px rgba(0, 0, 0, 0.3);
+  }
+
+  .sketch-list.mobile-open {
+    left: 0;
+  }
+
+  .code-panel {
+    position: fixed;
+    top: 0;
+    right: -100%;
+    width: 100%;
+    max-width: 100vw;
+    height: 100vh;
+    z-index: 100;
+    transition: right 0.3s ease;
+    box-shadow: -2px 0 10px rgba(0, 0, 0, 0.3);
+  }
+
+  .code-panel.mobile-open {
+    right: 0;
+  }
+
+  /* Mobile navigation bar */
+  .mobile-nav {
+    display: flex;
+    justify-content: space-around;
+    padding: 8px;
+    background-color: #181825;
+    border-top: 1px solid #313244;
+  }
+
+  .mobile-nav button {
+    flex: 1;
+    padding: 10px;
+    border: none;
+    border-radius: 6px;
+    background-color: transparent;
+    color: #a6adc8;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .mobile-nav button.active {
+    background-color: #313244;
+    color: #cdd6f4;
+  }
+
+  /* Show mobile toggle buttons */
+  .mobile-drawer-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  /* Show mobile menu button */
+  .mobile-menu-btn {
+    display: inline-flex;
+  }
+
+  /* Hide code toggle on mobile (use bottom nav instead) */
+  .code-toggle {
+    display: none;
+  }
+
+  /* Toolbar mobile adjustments */
+  .toolbar-desktop {
+    display: none;
+  }
+
+  .toolbar-mobile {
+    display: flex;
+    width: 100%;
+  }
+
+  /* Tools drawer for mobile */
+  .toolbar-tools-drawer {
+    position: fixed;
+    top: 0;
+    left: -100%;
+    width: 280px;
+    max-width: 80vw;
+    height: 100vh;
+    background-color: #181825;
+    z-index: 100;
+    padding: 16px;
+    flex-direction: column;
+    gap: 8px;
+    overflow-y: auto;
+    transition: left 0.3s ease;
+    box-shadow: 2px 0 10px rgba(0, 0, 0, 0.3);
+  }
+
+  .toolbar-tools-drawer.mobile-open {
+    left: 0;
+  }
+
+  .toolbar-tools-drawer .tool-section {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 0;
+    border-bottom: 1px solid #313244;
+  }
+
+  .toolbar-tools-drawer .tool-section:last-child {
+    border-bottom: none;
+  }
+
+  .toolbar-tools-drawer .section-label {
+    color: #6c7086;
+    font-size: 11px;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+
+  .toolbar-tools-drawer button {
+    width: 100%;
+    justify-content: flex-start;
+    text-align: left;
+    padding: 12px 16px;
+  }
+
+  /* Main content takes full width on mobile */
+  .main-content {
+    flex-direction: column;
+  }
+
+  .views-container {
+    flex: 1;
+  }
+
+  /* Full screen panels */
+  .view-panel {
+    border-right: none;
+  }
+
+  /* Mobile backdrop visible state */
+  .mobile-backdrop.visible {
+    display: block;
+  }
+
+  /* Panel headers smaller on mobile */
+  .panel-header {
+    padding: 6px 10px;
+    font-size: 11px;
+  }
+}
+
+/* Tablet adjustments */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .sketch-list {
+    width: 160px;
+    min-width: 120px;
+  }
+
+  .code-panel {
+    width: 350px;
+    min-width: 280px;
+  }
+}
+
+/* Desktop - hide mobile elements */
+@media (min-width: 769px) {
+  .mobile-nav {
+    display: none;
+  }
+
+  .toolbar-mobile {
+    display: none;
+  }
+
+  .toolbar-desktop {
+    display: flex;
+  }
+}

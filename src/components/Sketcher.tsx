@@ -54,6 +54,10 @@ export function Sketcher() {
   // Dimension editing state
   const [dimensionEdit, setDimensionEdit] = useState<DimensionEdit | null>(null);
 
+  // Touch state for pinch-to-zoom
+  const [lastTouchDistance, setLastTouchDistance] = useState<number | null>(null);
+  const lastTapRef = useRef<number>(0);
+
   // Store access
   const elements = useStore((state) => state.elements);
   const currentTool = useStore((state) => state.currentTool);
@@ -1105,6 +1109,289 @@ export function Sketcher() {
     setScale((prev) => Math.min(Math.max(prev * delta, 0.1), 10));
   };
 
+  // Touch event handlers for mobile support
+  const getTouchDistance = (touches: React.TouchList): number => {
+    if (touches.length < 2) return 0;
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  };
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (e.touches.length === 2) {
+      // Pinch-to-zoom start
+      e.preventDefault();
+      setLastTouchDistance(getTouchDistance(e.touches));
+      return;
+    }
+
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      const point = screenToWorld(touch.clientX, touch.clientY);
+
+      // Check for double-tap (for dimension editing)
+      const now = Date.now();
+      if (now - lastTapRef.current < 300) {
+        // Double tap detected
+        const clickedElement = currentPlaneElements.find((elem) => hitTestElement(point, elem));
+        if (clickedElement) {
+          const center = getElementCenter(clickedElement);
+          const screenPos = worldToScreen(center.x, center.y);
+
+          let value = '';
+          let dimension = '';
+
+          switch (clickedElement.type) {
+            case 'rectangle': {
+              const rectWidth = Math.abs(clickedElement.end.x - clickedElement.start.x);
+              value = rectWidth.toFixed(0);
+              dimension = 'width';
+              break;
+            }
+            case 'circle':
+              value = clickedElement.radius.toFixed(0);
+              dimension = 'radius';
+              break;
+            case 'line': {
+              const length = Math.sqrt(
+                (clickedElement.end.x - clickedElement.start.x) ** 2 +
+                  (clickedElement.end.y - clickedElement.start.y) ** 2
+              );
+              value = length.toFixed(0);
+              dimension = 'length';
+              break;
+            }
+            case 'hline':
+            case 'vline':
+              value = Math.abs(clickedElement.length).toFixed(0);
+              dimension = 'length';
+              break;
+            case 'arc':
+              value = clickedElement.radius.toFixed(0);
+              dimension = 'radius';
+              break;
+            default:
+              return;
+          }
+
+          setDimensionEdit({
+            elementId: clickedElement.id,
+            dimension,
+            position: { x: screenPos.x, y: screenPos.y },
+            value,
+          });
+          return;
+        }
+      }
+      lastTapRef.current = now;
+
+      // Same logic as mouse down
+      if (currentTool === 'select') {
+        const clickedElement = currentPlaneElements.find((elem) => hitTestElement(point, elem));
+
+        if (clickedElement) {
+          if (clickedElement.selected) {
+            setIsDragging(true);
+            setDragStart(point);
+            setDragElementId(clickedElement.id);
+          } else {
+            selectElement(clickedElement.id, false);
+          }
+        } else {
+          deselectAll();
+        }
+      } else if (currentTool === 'arc') {
+        if (!drawingState) {
+          setDrawingState({ tool: 'arc', step: 0, points: [point] });
+        } else if (drawingState.step === 0) {
+          setDrawingState({
+            ...drawingState,
+            step: 1,
+            points: [...drawingState.points, point],
+          });
+        } else if (drawingState.step === 1) {
+          setDrawingState({
+            ...drawingState,
+            step: 2,
+            points: [...drawingState.points, point],
+          });
+        } else if (drawingState.step === 2) {
+          const center = drawingState.points[0];
+          const radiusPoint = drawingState.points[1];
+          const radius = Math.sqrt(
+            (radiusPoint.x - center.x) ** 2 + (radiusPoint.y - center.y) ** 2
+          );
+          const startAngle = Math.atan2(
+            drawingState.points[2].y - center.y,
+            drawingState.points[2].x - center.x
+          );
+          const endAngle = Math.atan2(point.y - center.y, point.x - center.x);
+
+          addElement({
+            type: 'arc',
+            id: crypto.randomUUID(),
+            center,
+            radius,
+            startAngle,
+            endAngle,
+          });
+          setDrawingState(null);
+        }
+      } else if (currentTool === 'spline') {
+        if (!drawingState) {
+          setDrawingState({ tool: 'spline', step: 0, points: [point] });
+        } else {
+          setDrawingState({
+            ...drawingState,
+            points: [...drawingState.points, point],
+          });
+        }
+      } else {
+        setIsDrawing(true);
+        setStartPoint(point);
+        setCurrentPoint(point);
+      }
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (e.touches.length === 2) {
+      // Pinch-to-zoom
+      e.preventDefault();
+      const newDistance = getTouchDistance(e.touches);
+      if (lastTouchDistance !== null) {
+        const scaleFactor = newDistance / lastTouchDistance;
+        setScale((prev) => Math.min(Math.max(prev * scaleFactor, 0.1), 10));
+      }
+      setLastTouchDistance(newDistance);
+      return;
+    }
+
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      const point = screenToWorld(touch.clientX, touch.clientY);
+
+      if (isDragging && dragStart && dragElementId) {
+        const delta = {
+          x: point.x - dragStart.x,
+          y: point.y - dragStart.y,
+        };
+        moveElement(dragElementId, delta);
+        setDragStart(point);
+      } else if (isDrawing) {
+        setCurrentPoint(point);
+      } else if (drawingState) {
+        setCurrentPoint(point);
+      }
+    }
+  };
+
+  const handleTouchEnd = (_e: React.TouchEvent<HTMLCanvasElement>) => {
+    setLastTouchDistance(null);
+
+    if (isDragging) {
+      setIsDragging(false);
+      setDragStart(null);
+      setDragElementId(null);
+      return;
+    }
+
+    if (isDrawing && startPoint && currentPoint) {
+      switch (currentTool) {
+        case 'rectangle': {
+          const width = Math.abs(currentPoint.x - startPoint.x);
+          const height = Math.abs(currentPoint.y - startPoint.y);
+          if (width > 0 && height > 0) {
+            addElement({
+              type: 'rectangle',
+              id: crypto.randomUUID(),
+              start: {
+                x: Math.min(startPoint.x, currentPoint.x),
+                y: Math.min(startPoint.y, currentPoint.y),
+              },
+              end: {
+                x: Math.max(startPoint.x, currentPoint.x),
+                y: Math.max(startPoint.y, currentPoint.y),
+              },
+            });
+          }
+          break;
+        }
+
+        case 'circle': {
+          const radius = Math.sqrt(
+            (currentPoint.x - startPoint.x) ** 2 + (currentPoint.y - startPoint.y) ** 2
+          );
+          if (radius > 0) {
+            addElement({
+              type: 'circle',
+              id: crypto.randomUUID(),
+              center: startPoint,
+              radius,
+            });
+          }
+          break;
+        }
+
+        case 'line': {
+          const dx = currentPoint.x - startPoint.x;
+          const dy = currentPoint.y - startPoint.y;
+          if (dx !== 0 || dy !== 0) {
+            addElement({
+              type: 'line',
+              id: crypto.randomUUID(),
+              start: startPoint,
+              end: currentPoint,
+            });
+          }
+          break;
+        }
+
+        case 'hline': {
+          const length = currentPoint.x - startPoint.x;
+          if (length !== 0) {
+            addElement({
+              type: 'hline',
+              id: crypto.randomUUID(),
+              start: startPoint,
+              length,
+            });
+          }
+          break;
+        }
+
+        case 'vline': {
+          const length = currentPoint.y - startPoint.y;
+          if (length !== 0) {
+            addElement({
+              type: 'vline',
+              id: crypto.randomUUID(),
+              start: startPoint,
+              length,
+            });
+          }
+          break;
+        }
+      }
+    }
+
+    setIsDrawing(false);
+    setStartPoint(null);
+    setCurrentPoint(null);
+  };
+
+  // Long press handler for finishing spline on mobile
+  const handleLongPress = useCallback(() => {
+    if (drawingState?.tool === 'spline' && drawingState.points.length >= 2) {
+      addElement({
+        type: 'spline',
+        id: crypto.randomUUID(),
+        points: drawingState.points,
+      });
+      setDrawingState(null);
+    }
+  }, [drawingState, addElement]);
+
   // Escape key to cancel drawing
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1146,7 +1433,10 @@ export function Sketcher() {
         onWheel={handleWheel}
         onContextMenu={handleContextMenu}
         onDoubleClick={handleDoubleClick}
-        style={{ cursor: getCursor() }}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        style={{ cursor: getCursor(), touchAction: 'none' }}
       />
 
       {/* Dimension edit input overlay */}
@@ -1219,41 +1509,45 @@ export function Sketcher() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: '12px',
-          padding: '10px 16px',
+          gap: '8px',
+          padding: '8px 12px',
           backgroundColor: 'rgba(24, 24, 37, 0.95)',
           borderRadius: '8px',
           border: '1px solid #313244',
+          flexWrap: 'wrap',
         }}
       >
         <button
           onClick={() => setPlaneOperation(currentPlaneKey, 'extrude')}
           style={{
-            padding: '8px 16px',
+            padding: '8px 12px',
             border: currentOperation === 'extrude' ? '2px solid #a6e3a1' : '2px solid transparent',
             borderRadius: '6px',
             cursor: 'pointer',
             fontWeight: 600,
-            fontSize: '13px',
+            fontSize: '12px',
             backgroundColor: currentOperation === 'extrude' ? '#a6e3a1' : '#313244',
             color: currentOperation === 'extrude' ? '#1e1e2e' : '#cdd6f4',
             display: 'flex',
             alignItems: 'center',
-            gap: '6px',
+            gap: '4px',
             transition: 'all 0.2s',
+            minWidth: '80px',
+            justifyContent: 'center',
           }}
           title="Extrude sketch upward (add material)"
         >
-          <span style={{ fontSize: '16px' }}>↑</span>
+          <span style={{ fontSize: '14px' }}>↑</span>
           Extrude
         </button>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <label style={{ color: '#a6adc8', fontSize: '13px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <label style={{ color: '#a6adc8', fontSize: '12px' }}>
             Depth:
           </label>
           <input
             type="number"
+            inputMode="decimal"
             value={currentDepth}
             onChange={(e) => {
               const value = parseFloat(e.target.value);
@@ -1262,13 +1556,13 @@ export function Sketcher() {
               }
             }}
             style={{
-              width: '60px',
-              padding: '6px 10px',
+              width: '50px',
+              padding: '6px 8px',
               border: '1px solid #313244',
               borderRadius: '4px',
               backgroundColor: '#1e1e2e',
               color: '#cdd6f4',
-              fontSize: '13px',
+              fontSize: '12px',
               textAlign: 'center',
             }}
           />
@@ -1277,24 +1571,50 @@ export function Sketcher() {
         <button
           onClick={() => setPlaneOperation(currentPlaneKey, 'cut')}
           style={{
-            padding: '8px 16px',
+            padding: '8px 12px',
             border: currentOperation === 'cut' ? '2px solid #f38ba8' : '2px solid transparent',
             borderRadius: '6px',
             cursor: 'pointer',
             fontWeight: 600,
-            fontSize: '13px',
+            fontSize: '12px',
             backgroundColor: currentOperation === 'cut' ? '#f38ba8' : '#313244',
             color: currentOperation === 'cut' ? '#1e1e2e' : '#cdd6f4',
             display: 'flex',
             alignItems: 'center',
-            gap: '6px',
+            gap: '4px',
             transition: 'all 0.2s',
+            minWidth: '60px',
+            justifyContent: 'center',
           }}
           title="Cut sketch downward (remove material)"
         >
-          <span style={{ fontSize: '16px' }}>↓</span>
+          <span style={{ fontSize: '14px' }}>↓</span>
           Cut
         </button>
+
+        {/* Finish spline button for mobile */}
+        {drawingState?.tool === 'spline' && drawingState.points.length >= 2 && (
+          <button
+            onClick={handleLongPress}
+            style={{
+              padding: '8px 12px',
+              border: '2px solid #89b4fa',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontWeight: 600,
+              fontSize: '12px',
+              backgroundColor: '#89b4fa',
+              color: '#1e1e2e',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              transition: 'all 0.2s',
+            }}
+            title="Finish drawing spline"
+          >
+            ✓ Finish Spline
+          </button>
+        )}
       </div>
     </div>
   );
