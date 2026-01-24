@@ -9,7 +9,7 @@ export default defineConfig({
     format: 'es',
   },
   optimizeDeps: {
-    exclude: ['replicad-opencascadejs'],
+    exclude: ['opencascade.js'],
   },
   assetsInclude: ['**/*.wasm'],
 })
