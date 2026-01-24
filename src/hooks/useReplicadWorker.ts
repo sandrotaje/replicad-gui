@@ -13,7 +13,7 @@ export function useReplicadWorker() {
 
   useEffect(() => {
     workerRef.current = new Worker(
-      new URL('../workers/replicad.worker.ts', import.meta.url),
+      new URL('../workers/opencascade.worker.ts', import.meta.url),
       { type: 'module' }
     );
 
