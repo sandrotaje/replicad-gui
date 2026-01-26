@@ -42,15 +42,39 @@ function evaluateCode(code: string) {
 
     // Helper function to sketch on a face with offset positioning
     // Usage: sketchOnFace(drawing, shape, faceIndex, offsetX, offsetY)
+    // offsetX, offsetY are in global coordinates (matching the sketch display)
     function sketchOnFace(drawing, shape, faceIndex, offsetX = 0, offsetY = 0) {
       const face = shape.faces[faceIndex];
       if (!face) {
         throw new Error('Face not found at index ' + faceIndex);
       }
-      // Translate the 2D drawing by the offset, then sketch on the face
-      // Using no mode parameter (defaults to "bounds" behavior which properly places the sketch on the face)
+
+      // Get face center and normal
+      const center = face.center;
+      const normal = face.normalAt(center);
+
+      // Determine the plane orientation based on face normal
+      const absNX = Math.abs(normal.x);
+      const absNY = Math.abs(normal.y);
+      const absNZ = Math.abs(normal.z);
+
+      // Translate the drawing by the offset
       const translatedDrawing = drawing.translate(offsetX, offsetY);
-      return translatedDrawing.sketchOnFace(face);
+
+      if (absNZ > 0.99) {
+        // Horizontal face (XY plane type) at face's Z level
+        // Use XY plane with origin at (0, 0, Z)
+        return translatedDrawing.sketchOnPlane("XY", [0, 0, center.z]);
+      } else if (absNY > 0.99) {
+        // Vertical face (XZ plane type) at face's Y level
+        return translatedDrawing.sketchOnPlane("XZ", [0, center.y, 0]);
+      } else if (absNX > 0.99) {
+        // Vertical face (YZ plane type) at face's X level
+        return translatedDrawing.sketchOnPlane("YZ", [center.x, 0, 0]);
+      } else {
+        // Non-axis-aligned face - fall back to sketchOnFace with bounds mode
+        return translatedDrawing.sketchOnFace(face);
+      }
     }
 
     ${code}
@@ -126,19 +150,43 @@ function normalize(v: Point3D): Point3D {
 
 /**
  * Compute consistent xAxis and yAxis perpendicular to a given normal.
- * This creates a right-handed coordinate system on the face.
+ * For axis-aligned faces, align with standard XY/XZ/YZ planes to match sketch expectations.
  */
 function computeFaceAxes(normal: Point3D): { xAxis: Point3D; yAxis: Point3D } {
-  // Use a reference vector to compute xAxis perpendicular to normal
-  // Choose reference based on which axis normal is closest to
-  const refVector: Point3D = Math.abs(normal.z) < 0.9
+  const absX = Math.abs(normal.x);
+  const absY = Math.abs(normal.y);
+  const absZ = Math.abs(normal.z);
+
+  // For faces aligned with standard planes, use standard axis directions
+  if (absZ > 0.99) {
+    // Face normal is +Z or -Z (horizontal face like XY plane)
+    // Use X as xAxis, Y as yAxis (matching XY sketch plane)
+    return {
+      xAxis: { x: 1, y: 0, z: 0 },
+      yAxis: { x: 0, y: 1, z: 0 }
+    };
+  } else if (absY > 0.99) {
+    // Face normal is +Y or -Y (vertical face like XZ plane)
+    // Use X as xAxis, Z as yAxis (matching XZ sketch plane)
+    return {
+      xAxis: { x: 1, y: 0, z: 0 },
+      yAxis: { x: 0, y: 0, z: 1 }
+    };
+  } else if (absX > 0.99) {
+    // Face normal is +X or -X (vertical face like YZ plane)
+    // Use Y as xAxis, Z as yAxis (matching YZ sketch plane)
+    return {
+      xAxis: { x: 0, y: 1, z: 0 },
+      yAxis: { x: 0, y: 0, z: 1 }
+    };
+  }
+
+  // For non-axis-aligned faces, use cross product method
+  const refVector: Point3D = absZ < 0.9
     ? { x: 0, y: 0, z: 1 }
     : { x: 1, y: 0, z: 0 };
 
-  // xAxis = normalize(refVector × normal)
   const xAxis = normalize(cross(refVector, normal));
-
-  // yAxis = normalize(normal × xAxis) - right-handed system
   const yAxis = normalize(cross(normal, xAxis));
 
   return { xAxis, yAxis };
@@ -332,8 +380,26 @@ function extractShapeData(shape: unknown) {
                 // Compute face coordinate axes using helper function
                 const { xAxis, yAxis } = computeFaceAxes(normalVec);
 
-                // Use face center as the origin
-                const origin: Point3D = { x: center.x, y: center.y, z: center.z };
+                // Use global origin projected onto the face plane
+                // This ensures sketch coordinates match global 3D coordinates
+                const absNX = Math.abs(normalVec.x);
+                const absNY = Math.abs(normalVec.y);
+                const absNZ = Math.abs(normalVec.z);
+
+                let origin: Point3D;
+                if (absNZ > 0.99) {
+                  // Horizontal face (like XY plane) - use XY origin at face's Z
+                  origin = { x: 0, y: 0, z: center.z };
+                } else if (absNY > 0.99) {
+                  // Vertical face (like XZ plane) - use XZ origin at face's Y
+                  origin = { x: 0, y: center.y, z: 0 };
+                } else if (absNX > 0.99) {
+                  // Vertical face (like YZ plane) - use YZ origin at face's X
+                  origin = { x: center.x, y: 0, z: 0 };
+                } else {
+                  // Non-axis-aligned face - use face center
+                  origin = { x: center.x, y: center.y, z: center.z };
+                }
 
                 // Compute 2D bounds by projecting face mesh vertices
                 let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -424,12 +490,11 @@ function extractShapeData(shape: unknown) {
                         }
 
                         // Project 3D boundary to 2D using face coordinate system
-                        // Use raw face-local coordinates to match 3D space
+                        // Origin is set to global axis intercept, so coordinates match 3D space
                         const seen2D = new Set<string>();
                         boundaryPoints2D = [];
 
                         for (const pt of boundary3D) {
-                          // Project to face-local coordinates (relative to face origin)
                           const local = projectToFaceCoords(pt, origin, xAxis, yAxis);
 
                           const key = `${local.x.toFixed(4)},${local.y.toFixed(4)}`;
