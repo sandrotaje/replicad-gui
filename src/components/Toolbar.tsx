@@ -1,6 +1,7 @@
 import { useStore } from '../store/useStore';
 import { useFeatureStore } from '../store/useFeatureStore';
 import type { SketchTool, SketchFeature, ExtrusionFeature, CutFeature, Feature } from '../types';
+import { exportToSTL } from '../utils/stlExporter';
 
 interface ToolbarProps {
   isMobile?: boolean;
@@ -203,6 +204,14 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
     }
   };
 
+  const handleExportSTL = () => {
+    if (!shapeData) return;
+    exportToSTL(shapeData, 'model.stl');
+    if (isMobile && setToolsOpen) {
+      setToolsOpen(false);
+    }
+  };
+
   // Mobile tools drawer
   const renderMobileToolsDrawer = () => (
     <div className={`toolbar-tools-drawer ${toolsOpen ? 'mobile-open' : ''}`}>
@@ -302,6 +311,19 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
         ))}
       </div>
 
+      {/* Export Section */}
+      <div className="tool-section">
+        <span className="section-label">Export</span>
+        <button
+          style={shapeData ? featureButtonStyle('#94e2d5') : disabledButtonStyle()}
+          onClick={handleExportSTL}
+          disabled={!shapeData}
+          title="Export model as STL file"
+        >
+          Export STL
+        </button>
+      </div>
+
       <div style={{ marginTop: 'auto', paddingTop: '16px', borderTop: '1px solid #313244' }}>
         <span style={{ color: '#6c7086', fontSize: '12px' }}>
           {features.length} feature{features.length !== 1 ? 's' : ''}
@@ -394,6 +416,16 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
       </div>
 
       <div style={{ flex: 1 }} />
+
+      {/* Export */}
+      <button
+        style={shapeData ? featureButtonStyle('#94e2d5') : disabledButtonStyle()}
+        onClick={handleExportSTL}
+        disabled={!shapeData}
+        title="Export model as STL file"
+      >
+        Export STL
+      </button>
 
       {/* Status */}
       <span style={{ color: '#6c7086', fontSize: '12px' }}>
