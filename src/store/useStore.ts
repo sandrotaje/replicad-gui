@@ -98,14 +98,6 @@ interface AppState {
   setHoveredFace: (index: number | null) => void;
   setHoveredEdge: (index: number | null) => void;
   clearSelection: () => void;
-
-  // Legacy compatibility (for gradual migration)
-  rectangles: RectangleElement[];
-  selectedRectangleIds: Set<string>;
-  addRectangle: (rect: Omit<RectangleElement, 'plane' | 'selected' | 'type'>) => void;
-  updateRectangle: (id: string, updates: Partial<RectangleElement>) => void;
-  removeRectangle: (id: string) => void;
-  selectRectangle: (id: string, multiSelect?: boolean) => void;
 }
 
 // Helper to get a unique key for a plane (for grouping)
@@ -448,14 +440,6 @@ function main() {
   sketchPlane: 'XY' as SketchPlane,
   faceOutline: null,
   lastUpdateSource: null,
-
-  // Legacy compatibility - derived from elements
-  get rectangles() {
-    return get().elements.filter((e): e is RectangleElement => e.type === 'rectangle');
-  },
-  get selectedRectangleIds() {
-    return get().selectedElementIds;
-  },
 
   // Actions
   addElement: (elemWithoutPlane: NewElement) => {
@@ -870,51 +854,6 @@ function main() {
       hoveredFaceIndex: null,
       hoveredEdgeIndex: null,
     }),
-
-  // Legacy compatibility methods
-  addRectangle: (rect) => {
-    const state = get();
-    const planeKey = getPlaneKey(state.sketchPlane);
-    const operation = state.planeOperations.get(planeKey) || 'extrude';
-    const depth = state.planeDepths.get(planeKey) ?? state.defaultDepth;
-    const newElement: RectangleElement = {
-      ...rect,
-      type: 'rectangle',
-      plane: state.sketchPlane,
-      selected: false,
-      operation,
-      committed: false, // New elements start uncommitted
-      depth,
-    };
-    const newElements = [...state.elements, newElement];
-    const code = generateReplicadCode(newElements);
-    set({
-      elements: newElements,
-      code,
-      lastUpdateSource: 'sketch',
-    });
-  },
-
-  updateRectangle: (id, updates) => {
-    const state = get();
-    const newElements = state.elements.map((e) =>
-      e.id === id && e.type === 'rectangle' ? { ...e, ...updates } : e
-    );
-    const code = generateReplicadCode(newElements);
-    set({
-      elements: newElements,
-      code,
-      lastUpdateSource: 'sketch',
-    });
-  },
-
-  removeRectangle: (id) => {
-    get().removeElement(id);
-  },
-
-  selectRectangle: (id, multiSelect) => {
-    get().selectElement(id, multiSelect);
-  },
 }));
 
 // Helper to get the orientation of a plane (which standard plane it's parallel to)

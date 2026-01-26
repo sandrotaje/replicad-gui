@@ -2,5 +2,4 @@ export { Sketcher } from './Sketcher';
 export { CodeEditor } from './CodeEditor';
 export { Viewer3D } from './Viewer3D';
 export { Toolbar } from './Toolbar';
-export { SketchList } from './SketchList';
 export { FeatureTree } from './FeatureTree';

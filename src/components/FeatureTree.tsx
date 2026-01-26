@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { useFeatureStore } from '../store/useFeatureStore';
+import { FeatureEditDialog } from './FeatureEditDialog';
 import type {
   Feature,
   SketchFeature,
@@ -253,6 +254,7 @@ interface ContextMenuProps {
   onClose: () => void;
   onDelete: () => void;
   onEdit: () => void;
+  onEditParameters?: () => void;
 }
 
 const ContextMenu: React.FC<ContextMenuProps> = ({
@@ -262,6 +264,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
   onClose,
   onDelete,
   onEdit,
+  onEditParameters,
 }) => {
   const menuStyle: React.CSSProperties = {
     position: 'fixed',
@@ -320,6 +323,24 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
             <span>Edit Sketch</span>
           </div>
         )}
+        {(feature.type === 'extrusion' || feature.type === 'cut') && onEditParameters && (
+          <div
+            style={menuItemStyle}
+            onClick={() => {
+              onEditParameters();
+              onClose();
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = '#313244';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+            }}
+          >
+            <span>⚙️</span>
+            <span>Edit Parameters</span>
+          </div>
+        )}
         <div
           style={{ ...menuItemStyle, color: '#f38ba8' }}
           onClick={() => {
@@ -350,6 +371,7 @@ export const FeatureTree: React.FC = () => {
   const setActiveFeature = useFeatureStore((state) => state.setActiveFeature);
   const startEditingSketch = useFeatureStore((state) => state.startEditingSketch);
   const deleteFeature = useFeatureStore((state) => state.deleteFeature);
+  const updateFeature = useFeatureStore((state) => state.updateFeature);
   const undo = useFeatureStore((state) => state.undo);
   const redo = useFeatureStore((state) => state.redo);
   const canUndo = useFeatureStore((state) => state.canUndo);
@@ -362,15 +384,39 @@ export const FeatureTree: React.FC = () => {
     feature: Feature;
   } | null>(null);
 
+  // Edit dialog state
+  const [editingFeature, setEditingFeature] = useState<ExtrusionFeature | CutFeature | null>(null);
+
   const handleDoubleClick = useCallback(
     (feature: Feature) => {
       if (feature.type === 'sketch') {
         startEditingSketch(feature.id);
+      } else if (feature.type === 'extrusion' || feature.type === 'cut') {
+        setEditingFeature(feature as ExtrusionFeature | CutFeature);
       }
-      // For other feature types, could open a parameter editor in the future
     },
     [startEditingSketch]
   );
+
+  const handleEditParameters = useCallback(() => {
+    if (contextMenu && (contextMenu.feature.type === 'extrusion' || contextMenu.feature.type === 'cut')) {
+      setEditingFeature(contextMenu.feature as ExtrusionFeature | CutFeature);
+    }
+  }, [contextMenu]);
+
+  const handleSaveFeatureEdit = useCallback(
+    (updates: Partial<ExtrusionFeature | CutFeature>) => {
+      if (editingFeature) {
+        updateFeature(editingFeature.id, updates);
+        setEditingFeature(null);
+      }
+    },
+    [editingFeature, updateFeature]
+  );
+
+  const handleCancelFeatureEdit = useCallback(() => {
+    setEditingFeature(null);
+  }, []);
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent, feature: Feature) => {
@@ -570,6 +616,16 @@ export const FeatureTree: React.FC = () => {
           onClose={handleCloseContextMenu}
           onDelete={handleDeleteFromContext}
           onEdit={handleEditFromContext}
+          onEditParameters={handleEditParameters}
+        />
+      )}
+
+      {/* Feature edit dialog */}
+      {editingFeature && (
+        <FeatureEditDialog
+          feature={editingFeature}
+          onSave={handleSaveFeatureEdit}
+          onCancel={handleCancelFeatureEdit}
         />
       )}
     </div>

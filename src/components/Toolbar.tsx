@@ -1,24 +1,19 @@
 import { useStore } from '../store/useStore';
 import { useFeatureStore } from '../store/useFeatureStore';
-import type { StandardPlane, SketchTool, SketchFeature, ExtrusionFeature, CutFeature, Feature } from '../types';
+import type { SketchTool, SketchFeature, ExtrusionFeature, CutFeature, Feature } from '../types';
 
 interface ToolbarProps {
   isMobile?: boolean;
   toolsOpen?: boolean;
   setToolsOpen?: (open: boolean) => void;
-  useFeatureMode?: boolean;
 }
 
-export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen, useFeatureMode = false }: ToolbarProps) {
-  // Legacy store
+export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: ToolbarProps) {
+  // Legacy store (for tools, 3D selection, and shape data)
   const currentTool = useStore((state) => state.currentTool);
   const setCurrentTool = useStore((state) => state.setCurrentTool);
-  const elements = useStore((state) => state.elements);
-  const shapeData = useStore((state) => state.shapeData);
-  const sketchPlane = useStore((state) => state.sketchPlane);
-  const setSketchPlane = useStore((state) => state.setSketchPlane);
-  const sketchOnFace = useStore((state) => state.sketchOnFace);
   const selectedFaceIndices = useStore((state) => state.selectedFaceIndices);
+  const shapeData = useStore((state) => state.shapeData);
 
   // Feature store
   const features = useFeatureStore((state) => state.features);
@@ -27,26 +22,21 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen, use
   const startEditingSketch = useFeatureStore((state) => state.startEditingSketch);
   const stopEditingSketch = useFeatureStore((state) => state.stopEditingSketch);
   const generateUniqueName = useFeatureStore((state) => state.generateUniqueName);
-  const finalShape = useFeatureStore((state) => state.finalShape);
 
-  const isStandardPlane = typeof sketchPlane === 'string';
-  const currentStandardPlane = isStandardPlane ? sketchPlane : null;
-
-  // Check if a planar face is selected (for feature mode)
+  // Check if a planar face is selected (use shapeData from useStore, same as Viewer3D)
   const selectedPlanarFace = (() => {
-    const dataToUse = useFeatureMode ? finalShape : shapeData;
-    if (selectedFaceIndices.size !== 1 || !dataToUse) return null;
+    if (selectedFaceIndices.size !== 1 || !shapeData) return null;
     const faceIndex = Array.from(selectedFaceIndices)[0];
-    const face = dataToUse.individualFaces.find(f => f.faceIndex === faceIndex);
+    const face = shapeData.individualFaces.find(f => f.faceIndex === faceIndex);
     return face?.isPlanar ? face : null;
   })();
 
-  // Get the currently editing sketch (for feature mode)
+  // Get the currently editing sketch
   const editingSketch = editingSketchId
     ? features.find(f => f.id === editingSketchId) as SketchFeature | undefined
     : undefined;
 
-  // Count extrudable elements in the current sketch (feature mode)
+  // Count extrudable elements in the current sketch
   const extrudableElementCount = editingSketch
     ? editingSketch.elements.filter(e => e.type === 'rectangle' || e.type === 'circle').length
     : 0;
@@ -60,18 +50,6 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen, use
     fontSize: '13px',
     transition: 'all 0.2s',
     backgroundColor: isActive ? '#89b4fa' : '#313244',
-    color: isActive ? '#1e1e2e' : '#cdd6f4',
-  });
-
-  const smallButtonStyle = (isActive: boolean) => ({
-    padding: '6px 12px',
-    border: 'none',
-    borderRadius: '4px',
-    cursor: 'pointer',
-    fontWeight: 500 as const,
-    fontSize: '12px',
-    transition: 'all 0.2s',
-    backgroundColor: isActive ? '#a6e3a1' : '#313244',
     color: isActive ? '#1e1e2e' : '#cdd6f4',
   });
 
@@ -109,14 +87,6 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen, use
     { tool: 'spline', icon: '~', label: 'Spline', title: 'Spline Tool (S)' },
   ];
 
-  // Count elements by type
-  const elementCounts = elements.reduce((acc, el) => {
-    acc[el.type] = (acc[el.type] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
-
-  const totalElements = elements.length;
-
   const handleToolSelect = (tool: SketchTool) => {
     setCurrentTool(tool);
     if (isMobile && setToolsOpen) {
@@ -124,7 +94,7 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen, use
     }
   };
 
-  // Feature mode handlers
+  // Feature handlers
   const handleNewSketch = () => {
     const sketchFeatureData: Omit<SketchFeature, 'id' | 'createdAt' | 'isValid' | 'isDirty'> = {
       type: 'sketch',
@@ -148,12 +118,12 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen, use
     const faceIndex = selectedPlanarFace.faceIndex;
     const boundaryPoints = selectedPlanarFace.boundaryPoints2D || [];
 
-    // Find the last extrusion feature to reference
-    const extrusionFeatures = features.filter(f => f.type === 'extrusion');
-    const lastExtrusion = extrusionFeatures[extrusionFeatures.length - 1] as ExtrusionFeature | undefined;
+    // Find the last 3D-generating feature (extrusion or cut) to reference
+    const solidFeatures = features.filter(f => f.type === 'extrusion' || f.type === 'cut');
+    const lastSolidFeature = solidFeatures[solidFeatures.length - 1] as ExtrusionFeature | CutFeature | undefined;
 
-    if (!lastExtrusion) {
-      console.warn('Cannot sketch on face: No extrusion features found');
+    if (!lastSolidFeature) {
+      console.warn('Cannot sketch on face: No solid features (extrusion/cut) found. Create an extrusion first.');
       return;
     }
 
@@ -162,7 +132,7 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen, use
       name: generateUniqueName('sketch'),
       reference: {
         type: 'face',
-        parentFeatureId: lastExtrusion.id,
+        parentFeatureId: lastSolidFeature.id,
         faceIndex,
         boundaryPoints,
       },
@@ -258,61 +228,59 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen, use
         </button>
       </div>
 
-      {/* Feature Mode Tools */}
-      {useFeatureMode && (
-        <div className="tool-section">
-          <span className="section-label">Features</span>
+      {/* Feature Tools */}
+      <div className="tool-section">
+        <span className="section-label">Features</span>
+        <button
+          style={featureButtonStyle('#a6e3a1')}
+          onClick={handleNewSketch}
+          title="Create a new sketch on XY plane (S)"
+        >
+          + New Sketch
+        </button>
+        {selectedPlanarFace && (
           <button
-            style={featureButtonStyle('#a6e3a1')}
-            onClick={handleNewSketch}
-            title="Create a new sketch on XY plane (S)"
+            style={featureButtonStyle('#f9e2af')}
+            onClick={handleSketchOnFace}
+            title="Create a sketch on the selected face"
           >
-            + New Sketch
+            Sketch on Face
           </button>
-          {selectedPlanarFace && (
+        )}
+        {editingSketchId && (
+          <>
             <button
-              style={featureButtonStyle('#f9e2af')}
-              onClick={handleSketchOnFace}
-              title="Create a sketch on the selected face"
+              style={extrudableElementCount > 0 ? featureButtonStyle('#89b4fa') : disabledButtonStyle()}
+              onClick={handleExtrude}
+              disabled={extrudableElementCount === 0}
+              title="Extrude the current sketch (E)"
             >
-              Sketch on Face
+              Extrude
             </button>
-          )}
-          {editingSketchId && (
-            <>
-              <button
-                style={extrudableElementCount > 0 ? featureButtonStyle('#89b4fa') : disabledButtonStyle()}
-                onClick={handleExtrude}
-                disabled={extrudableElementCount === 0}
-                title="Extrude the current sketch (E)"
-              >
-                Extrude
-              </button>
-              <button
-                style={extrudableElementCount > 0 && features.some(f => f.type === 'extrusion')
-                  ? featureButtonStyle('#f38ba8')
-                  : disabledButtonStyle()}
-                onClick={handleCut}
-                disabled={extrudableElementCount === 0 || !features.some(f => f.type === 'extrusion')}
-                title="Cut using the current sketch (X)"
-              >
-                Cut
-              </button>
-              <button
-                style={{
-                  ...featureButtonStyle('#6c7086'),
-                  backgroundColor: '#313244',
-                  color: '#cdd6f4',
-                }}
-                onClick={handleFinishSketch}
-                title="Finish editing without creating a feature (Esc)"
-              >
-                Finish Sketch
-              </button>
-            </>
-          )}
-        </div>
-      )}
+            <button
+              style={extrudableElementCount > 0 && features.some(f => f.type === 'extrusion')
+                ? featureButtonStyle('#f38ba8')
+                : disabledButtonStyle()}
+              onClick={handleCut}
+              disabled={extrudableElementCount === 0 || !features.some(f => f.type === 'extrusion')}
+              title="Cut using the current sketch (X)"
+            >
+              Cut
+            </button>
+            <button
+              style={{
+                ...featureButtonStyle('#6c7086'),
+                backgroundColor: '#313244',
+                color: '#cdd6f4',
+              }}
+              onClick={handleFinishSketch}
+              title="Finish editing without creating a feature (Esc)"
+            >
+              Finish Sketch
+            </button>
+          </>
+        )}
+      </div>
 
       <div className="tool-section">
         <span className="section-label">Drawing Tools</span>
@@ -334,55 +302,9 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen, use
         ))}
       </div>
 
-      {!useFeatureMode && (
-        <div className="tool-section">
-          <span className="section-label">Sketch Plane</span>
-          {(['XY', 'XZ', 'YZ'] as StandardPlane[]).map((plane) => (
-            <button
-              key={plane}
-              style={smallButtonStyle(currentStandardPlane === plane)}
-              onClick={() => setSketchPlane(plane)}
-              title={`Sketch on ${plane} plane`}
-            >
-              {plane} Plane
-            </button>
-          ))}
-          {!isStandardPlane && (
-            <span style={{ color: '#f9e2af', fontSize: '12px', fontStyle: 'italic', padding: '8px' }}>
-              Currently: Face {(sketchPlane as { faceIndex: number }).faceIndex}
-            </span>
-          )}
-        </div>
-      )}
-
-      {!useFeatureMode && shapeData && selectedPlanarFace && (
-        <div className="tool-section">
-          <span className="section-label">3D Selection</span>
-          <button
-            style={{
-              padding: '12px 16px',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontWeight: 500,
-              fontSize: '12px',
-              backgroundColor: '#f9e2af',
-              color: '#1e1e2e',
-            }}
-            onClick={() => sketchOnFace(selectedPlanarFace.faceIndex)}
-            title="Sketch on selected face"
-          >
-            Sketch on Face
-          </button>
-        </div>
-      )}
-
       <div style={{ marginTop: 'auto', paddingTop: '16px', borderTop: '1px solid #313244' }}>
         <span style={{ color: '#6c7086', fontSize: '12px' }}>
-          {useFeatureMode
-            ? `${features.length} feature${features.length !== 1 ? 's' : ''}`
-            : `${totalElements} element${totalElements !== 1 ? 's' : ''}`
-          }
+          {features.length} feature{features.length !== 1 ? 's' : ''}
         </span>
       </div>
     </div>
@@ -391,75 +313,71 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen, use
   // Desktop toolbar
   const renderDesktopToolbar = () => (
     <div className="toolbar-desktop" style={{ display: 'flex', gap: '12px', flex: 1, alignItems: 'center' }}>
-      {/* Feature Mode Buttons */}
-      {useFeatureMode && (
+      {/* Feature Buttons */}
+      <button
+        style={featureButtonStyle('#a6e3a1')}
+        onClick={handleNewSketch}
+        title="Create a new sketch on XY plane (S)"
+      >
+        + Sketch
+      </button>
+
+      {selectedPlanarFace && !editingSketchId && (
+        <button
+          style={featureButtonStyle('#f9e2af')}
+          onClick={handleSketchOnFace}
+          title="Create a sketch on the selected face"
+        >
+          Sketch on Face
+        </button>
+      )}
+
+      {editingSketchId && (
         <>
           <button
-            style={featureButtonStyle('#a6e3a1')}
-            onClick={handleNewSketch}
-            title="Create a new sketch on XY plane (S)"
+            style={extrudableElementCount > 0 ? featureButtonStyle('#89b4fa') : disabledButtonStyle()}
+            onClick={handleExtrude}
+            disabled={extrudableElementCount === 0}
+            title="Extrude the current sketch (E)"
           >
-            + Sketch
+            Extrude
           </button>
-
-          {selectedPlanarFace && !editingSketchId && (
-            <button
-              style={featureButtonStyle('#f9e2af')}
-              onClick={handleSketchOnFace}
-              title="Create a sketch on the selected face"
-            >
-              Sketch on Face
-            </button>
-          )}
-
-          {editingSketchId && (
-            <>
-              <button
-                style={extrudableElementCount > 0 ? featureButtonStyle('#89b4fa') : disabledButtonStyle()}
-                onClick={handleExtrude}
-                disabled={extrudableElementCount === 0}
-                title="Extrude the current sketch (E)"
-              >
-                Extrude
-              </button>
-              <button
-                style={extrudableElementCount > 0 && features.some(f => f.type === 'extrusion')
-                  ? featureButtonStyle('#f38ba8')
-                  : disabledButtonStyle()}
-                onClick={handleCut}
-                disabled={extrudableElementCount === 0 || !features.some(f => f.type === 'extrusion')}
-                title="Cut using the current sketch (X)"
-              >
-                Cut
-              </button>
-              <button
-                style={{
-                  padding: '8px 12px',
-                  border: '1px solid #45475a',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontWeight: 500,
-                  fontSize: '13px',
-                  backgroundColor: 'transparent',
-                  color: '#a6adc8',
-                }}
-                onClick={handleFinishSketch}
-                title="Finish editing without creating a feature (Esc)"
-              >
-                Finish
-              </button>
-            </>
-          )}
-
-          <div
+          <button
+            style={extrudableElementCount > 0 && features.some(f => f.type === 'extrusion')
+              ? featureButtonStyle('#f38ba8')
+              : disabledButtonStyle()}
+            onClick={handleCut}
+            disabled={extrudableElementCount === 0 || !features.some(f => f.type === 'extrusion')}
+            title="Cut using the current sketch (X)"
+          >
+            Cut
+          </button>
+          <button
             style={{
-              width: '1px',
-              height: '24px',
-              backgroundColor: '#313244',
+              padding: '8px 12px',
+              border: '1px solid #45475a',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontWeight: 500,
+              fontSize: '13px',
+              backgroundColor: 'transparent',
+              color: '#a6adc8',
             }}
-          />
+            onClick={handleFinishSketch}
+            title="Finish editing without creating a feature (Esc)"
+          >
+            Finish
+          </button>
         </>
       )}
+
+      <div
+        style={{
+          width: '1px',
+          height: '24px',
+          backgroundColor: '#313244',
+        }}
+      />
 
       {/* Drawing Tools */}
       <div style={{ display: 'flex', gap: '4px' }}>
@@ -475,94 +393,15 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen, use
         ))}
       </div>
 
-      {!useFeatureMode && (
-        <>
-          <div
-            style={{
-              width: '1px',
-              height: '24px',
-              backgroundColor: '#313244',
-            }}
-          />
-
-          {/* Plane Selection */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <label style={{ color: '#a6adc8', fontSize: '13px' }}>
-              Plane:
-            </label>
-            {(['XY', 'XZ', 'YZ'] as StandardPlane[]).map((plane) => (
-              <button
-                key={plane}
-                style={smallButtonStyle(currentStandardPlane === plane)}
-                onClick={() => setSketchPlane(plane)}
-                title={`Sketch on ${plane} plane`}
-              >
-                {plane}
-              </button>
-            ))}
-            {!isStandardPlane && (
-              <span style={{ color: '#f9e2af', fontSize: '12px', fontStyle: 'italic' }}>
-                Face {(sketchPlane as { faceIndex: number }).faceIndex}
-              </span>
-            )}
-          </div>
-
-          {/* Sketch on Face button (only show when planar face is selected) */}
-          {shapeData && selectedPlanarFace && (
-            <>
-              <div
-                style={{
-                  width: '1px',
-                  height: '24px',
-                  backgroundColor: '#313244',
-                }}
-              />
-
-              <button
-                style={{
-                  padding: '6px 12px',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontWeight: 500,
-                  fontSize: '12px',
-                  backgroundColor: '#f9e2af',
-                  color: '#1e1e2e',
-                }}
-                onClick={() => sketchOnFace(selectedPlanarFace.faceIndex)}
-                title="Sketch on selected face"
-              >
-                Sketch on Face
-              </button>
-            </>
-          )}
-        </>
-      )}
-
       <div style={{ flex: 1 }} />
 
       {/* Status */}
       <span style={{ color: '#6c7086', fontSize: '12px' }}>
-        {useFeatureMode ? (
-          <>
-            {features.length} feature{features.length !== 1 ? 's' : ''}
-            {editingSketchId && editingSketch && (
-              <span style={{ marginLeft: '8px', color: '#a6e3a1' }}>
-                (Editing: {editingSketch.name})
-              </span>
-            )}
-          </>
-        ) : (
-          <>
-            {totalElements} element{totalElements !== 1 ? 's' : ''}
-            {totalElements > 0 && (
-              <span style={{ marginLeft: '4px' }}>
-                ({Object.entries(elementCounts)
-                  .map(([type, count]) => `${count} ${type}${count !== 1 ? 's' : ''}`)
-                  .join(', ')})
-              </span>
-            )}
-          </>
+        {features.length} feature{features.length !== 1 ? 's' : ''}
+        {editingSketchId && editingSketch && (
+          <span style={{ marginLeft: '8px', color: '#a6e3a1' }}>
+            (Editing: {editingSketch.name})
+          </span>
         )}
       </span>
     </div>
@@ -608,8 +447,8 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen, use
         </span>
       </div>
 
-      {/* Feature mode: editing indicator */}
-      {useFeatureMode && editingSketchId && editingSketch && (
+      {/* Editing indicator */}
+      {editingSketchId && editingSketch && (
         <div style={{
           padding: '6px 10px',
           backgroundColor: '#313244',
@@ -621,27 +460,11 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen, use
         </div>
       )}
 
-      {/* Legacy mode: Quick plane indicator */}
-      {!useFeatureMode && (
-        <div style={{
-          padding: '6px 10px',
-          backgroundColor: '#313244',
-          borderRadius: '6px',
-          fontSize: '12px',
-          color: '#a6e3a1',
-        }}>
-          {isStandardPlane ? currentStandardPlane : `Face ${(sketchPlane as { faceIndex: number }).faceIndex}`}
-        </div>
-      )}
-
       <div style={{ flex: 1 }} />
 
       {/* Count (compact) */}
       <span style={{ color: '#6c7086', fontSize: '11px' }}>
-        {useFeatureMode
-          ? `${features.length} feat`
-          : `${totalElements} elem`
-        }
+        {features.length} feat
       </span>
     </div>
   );

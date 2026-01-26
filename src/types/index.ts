@@ -99,15 +99,6 @@ export type SketchTool =
   | 'arc'
   | 'spline';
 
-// Legacy Rectangle type (for backward compatibility during migration)
-export interface Rectangle {
-  id: string;
-  start: Point;
-  end: Point;
-  selected: boolean;
-  plane: SketchPlane;
-}
-
 export interface MeshData {
   vertices: Float32Array;
   normals: Float32Array;

@@ -1,5 +1,5 @@
 /**
- * Hook to synchronize the legacy store with the feature store when editing a sketch in feature mode.
+ * Hook to synchronize the legacy store with the feature store when editing a sketch.
  *
  * This bridge allows the existing Sketcher component to work with the new feature-based system
  * by syncing elements between the two stores.
@@ -10,11 +10,7 @@ import { useStore } from '../store/useStore';
 import { useFeatureStore } from '../store/useFeatureStore';
 import type { SketchFeature, SketchElement, StandardPlane } from '../types';
 
-interface UseFeatureSketchSyncOptions {
-  enabled: boolean;
-}
-
-export function useFeatureSketchSync({ enabled }: UseFeatureSketchSyncOptions) {
+export function useFeatureSketchSync() {
   const syncInProgressRef = useRef(false);
   const lastSyncedElementsRef = useRef<string>('');
 
@@ -34,7 +30,7 @@ export function useFeatureSketchSync({ enabled }: UseFeatureSketchSyncOptions) {
 
   // Sync from feature store to legacy store when editing starts
   useEffect(() => {
-    if (!enabled || !editingSketch) return;
+    if (!editingSketch) return;
 
     syncInProgressRef.current = true;
 
@@ -61,11 +57,11 @@ export function useFeatureSketchSync({ enabled }: UseFeatureSketchSyncOptions) {
     lastSyncedElementsRef.current = JSON.stringify(sketchElements.map((e) => e.id).sort());
 
     syncInProgressRef.current = false;
-  }, [enabled, editingSketchId]); // Only re-run when editing starts/stops
+  }, [editingSketchId]); // Only re-run when editing starts/stops
 
   // Sync from legacy store to feature store when elements change
   useEffect(() => {
-    if (!enabled || !editingSketchId || syncInProgressRef.current) return;
+    if (!editingSketchId || syncInProgressRef.current) return;
 
     // Check if elements actually changed (by comparing IDs)
     const currentElementIds = JSON.stringify(legacyElements.map((e) => e.id).sort());
@@ -93,12 +89,10 @@ export function useFeatureSketchSync({ enabled }: UseFeatureSketchSyncOptions) {
     });
 
     lastSyncedElementsRef.current = currentElementIds;
-  }, [enabled, editingSketchId, legacyElements, features, addSketchElement, updateFeature]);
+  }, [editingSketchId, legacyElements, features, addSketchElement, updateFeature]);
 
   // Clean up when editing stops
   useEffect(() => {
-    if (!enabled) return;
-
     return () => {
       // When editing stops, clear the legacy store
       if (!editingSketchId) {
@@ -110,7 +104,7 @@ export function useFeatureSketchSync({ enabled }: UseFeatureSketchSyncOptions) {
         lastSyncedElementsRef.current = '';
       }
     };
-  }, [enabled, editingSketchId]);
+  }, [editingSketchId]);
 
   return {
     editingSketch,

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Sketcher, CodeEditor, Viewer3D, Toolbar, SketchList, FeatureTree } from './components';
+import { Sketcher, CodeEditor, Viewer3D, Toolbar, FeatureTree } from './components';
 import { useFeatureStore } from './store/useFeatureStore';
 import { useStore } from './store/useStore';
 import { featureEvaluator } from './utils/featureEvaluator';
@@ -9,19 +9,13 @@ import './App.css';
 
 type ViewMode = 'split' | 'sketcher' | '3d';
 
-// Feature mode toggle - set to true to use the new feature-based system
-const FEATURE_MODE_ENABLED = true;
-
 function App() {
   const [viewMode, setViewMode] = useState<ViewMode>('split');
   const [showCode, setShowCode] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
-  const [sketchListOpen, setSketchListOpen] = useState(false);
+  const [featureTreeOpen, setFeatureTreeOpen] = useState(false);
   const [codeOpen, setCodeOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
-
-  // Feature mode state
-  const [useFeatureMode, setUseFeatureMode] = useState(FEATURE_MODE_ENABLED);
 
   // Feature store
   const features = useFeatureStore((state) => state.features);
@@ -35,7 +29,7 @@ function App() {
   const { evaluate } = useReplicadWorker();
 
   // Sync legacy store with feature store when editing a sketch
-  useFeatureSketchSync({ enabled: useFeatureMode });
+  useFeatureSketchSync();
 
   // Enable keyboard shortcuts when in feature mode
   useKeyboardShortcuts();
@@ -48,35 +42,33 @@ function App() {
 
   // Note: Face boundary is available from editingSketch.reference.boundaryPoints when needed
 
-  // Generate and evaluate code when features change (in feature mode)
+  // Generate and evaluate code when features change
   const evaluateFeatures = useCallback(() => {
-    if (!useFeatureMode) return;
-
     const code = featureEvaluator.generateFullCode(features);
     console.log('[Feature Mode] Generated code:', code);
 
     // Send to worker for evaluation
     evaluate(code);
-  }, [features, useFeatureMode, evaluate]);
+  }, [features, evaluate]);
 
   // Trigger evaluation when features change
   useEffect(() => {
-    if (useFeatureMode && features.length > 0) {
+    if (features.length > 0) {
       // Debounce evaluation
       const timer = setTimeout(() => {
         evaluateFeatures();
       }, 100);
       return () => clearTimeout(timer);
     }
-  }, [features, useFeatureMode, evaluateFeatures]);
+  }, [features, evaluateFeatures]);
 
   // Sync shape data from legacy store to feature store
   const shapeData = useStore((state) => state.shapeData);
   useEffect(() => {
-    if (useFeatureMode && shapeData) {
+    if (shapeData) {
       setFinalShape(shapeData);
     }
-  }, [shapeData, useFeatureMode, setFinalShape]);
+  }, [shapeData, setFinalShape]);
 
   // Detect mobile viewport
   useEffect(() => {
@@ -96,109 +88,56 @@ function App() {
 
   // Close drawers when clicking backdrop
   const closeAllDrawers = () => {
-    setSketchListOpen(false);
+    setFeatureTreeOpen(false);
     setCodeOpen(false);
     setToolsOpen(false);
   };
 
-  const anyDrawerOpen = sketchListOpen || codeOpen || toolsOpen;
+  const anyDrawerOpen = featureTreeOpen || codeOpen || toolsOpen;
 
-  // Render the main content based on mode
+  // Render the main content
   const renderMainContent = () => {
-    if (useFeatureMode) {
-      return (
-        <>
-          {/* Feature Tree on left (desktop only) */}
-          {!isMobile && <FeatureTree />}
-
-          {/* Main views area */}
-          <div className={`views-container ${viewMode}`}>
-            {/* Show Sketcher when editing a sketch, otherwise show normal view modes */}
-            {editingSketchId ? (
-              <>
-                {/* When editing sketch, always show the sketcher */}
-                <div className="view-panel sketcher-panel">
-                  <div className="panel-header">
-                    2D Sketcher - {editingSketch?.name || 'Editing Sketch'}
-                  </div>
-                  <Sketcher />
-                </div>
-                {/* Show 3D preview alongside when in split mode */}
-                {viewMode === 'split' && (
-                  <div className="view-panel viewer-panel">
-                    <div className="panel-header">3D Preview</div>
-                    <Viewer3D />
-                  </div>
-                )}
-              </>
-            ) : (
-              <>
-                {/* Normal view modes when not editing */}
-                {(viewMode === 'split' || viewMode === 'sketcher') && (
-                  <div className="view-panel sketcher-panel">
-                    <div className="panel-header">2D Sketcher</div>
-                    <Sketcher />
-                  </div>
-                )}
-                {(viewMode === 'split' || viewMode === '3d') && (
-                  <div className="view-panel viewer-panel">
-                    <div className="panel-header">3D Preview</div>
-                    <Viewer3D />
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </>
-      );
-    }
-
-    // Legacy mode rendering
     return (
       <>
-        {isMobile ? (
-          <div className={`sketch-list-drawer ${sketchListOpen ? 'mobile-open' : ''}`}>
-            <div style={{
-              padding: '12px 16px',
-              borderBottom: '1px solid #313244',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              backgroundColor: '#181825'
-            }}>
-              <span style={{ fontWeight: 500 }}>Sketches</span>
-              <button
-                onClick={() => setSketchListOpen(false)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#cdd6f4',
-                  fontSize: '18px',
-                  cursor: 'pointer',
-                  padding: '4px 8px'
-                }}
-              >
-                X
-              </button>
-            </div>
-            <SketchList hideMobileHeader />
-          </div>
-        ) : (
-          <SketchList />
-        )}
+        {/* Feature Tree on left (desktop only) */}
+        {!isMobile && <FeatureTree />}
 
+        {/* Main views area */}
         <div className={`views-container ${viewMode}`}>
-          {(viewMode === 'split' || viewMode === 'sketcher') && (
-            <div className="view-panel sketcher-panel">
-              <div className="panel-header">2D Sketcher</div>
-              <Sketcher />
-            </div>
-          )}
-          {(viewMode === 'split' || viewMode === '3d') && (
-            <div className="view-panel viewer-panel">
-              <div className="panel-header">3D Preview</div>
-              <Viewer3D />
-            </div>
+          {/* Show Sketcher when editing a sketch, otherwise show normal view modes */}
+          {editingSketchId ? (
+            <>
+              {/* When editing sketch, always show the sketcher */}
+              <div className="view-panel sketcher-panel">
+                <div className="panel-header">
+                  2D Sketcher - {editingSketch?.name || 'Editing Sketch'}
+                </div>
+                <Sketcher />
+              </div>
+              {/* Show 3D preview alongside when in split mode */}
+              {viewMode === 'split' && (
+                <div className="view-panel viewer-panel">
+                  <div className="panel-header">3D Preview</div>
+                  <Viewer3D />
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              {/* Normal view modes when not editing */}
+              {(viewMode === 'split' || viewMode === 'sketcher') && (
+                <div className="view-panel sketcher-panel">
+                  <div className="panel-header">2D Sketcher</div>
+                  <Sketcher />
+                </div>
+              )}
+              {(viewMode === 'split' || viewMode === '3d') && (
+                <div className="view-panel viewer-panel">
+                  <div className="panel-header">3D Preview</div>
+                  <Viewer3D />
+                </div>
+              )}
+            </>
           )}
         </div>
       </>
@@ -217,27 +156,17 @@ function App() {
         isMobile={isMobile}
         toolsOpen={toolsOpen}
         setToolsOpen={setToolsOpen}
-        useFeatureMode={useFeatureMode}
       />
 
       <div className="view-controls">
         <div className="view-tabs">
-          {/* Feature mode: Mobile drawer toggle for feature tree */}
-          {isMobile && useFeatureMode && (
+          {/* Mobile drawer toggle for feature tree */}
+          {isMobile && (
             <button
               className="mobile-drawer-toggle"
-              onClick={() => setSketchListOpen(!sketchListOpen)}
+              onClick={() => setFeatureTreeOpen(!featureTreeOpen)}
             >
               Features
-            </button>
-          )}
-          {/* Legacy mode: Mobile drawer toggle for sketch list */}
-          {isMobile && !useFeatureMode && (
-            <button
-              className="mobile-drawer-toggle"
-              onClick={() => setSketchListOpen(!sketchListOpen)}
-            >
-              Sketches
             </button>
           )}
           {!isMobile && (
@@ -261,19 +190,6 @@ function App() {
           >
             3D View
           </button>
-
-          {/* Feature mode toggle for development/testing */}
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <label style={{ fontSize: '11px', color: '#6c7086' }}>
-              <input
-                type="checkbox"
-                checked={useFeatureMode}
-                onChange={(e) => setUseFeatureMode(e.target.checked)}
-                style={{ marginRight: '4px' }}
-              />
-              Feature Mode
-            </label>
-          </div>
         </div>
         {!isMobile && (
           <button
@@ -295,8 +211,8 @@ function App() {
 
       <div className="main-content">
         {/* Mobile feature tree drawer */}
-        {isMobile && useFeatureMode && (
-          <div className={`sketch-list-drawer ${sketchListOpen ? 'mobile-open' : ''}`}>
+        {isMobile && (
+          <div className={`sketch-list-drawer ${featureTreeOpen ? 'mobile-open' : ''}`}>
             <div style={{
               padding: '12px 16px',
               borderBottom: '1px solid #313244',
@@ -307,7 +223,7 @@ function App() {
             }}>
               <span style={{ fontWeight: 500 }}>Features</span>
               <button
-                onClick={() => setSketchListOpen(false)}
+                onClick={() => setFeatureTreeOpen(false)}
                 style={{
                   background: 'none',
                   border: 'none',

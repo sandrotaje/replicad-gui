@@ -1,43 +1,14 @@
-import { useEffect, useRef } from 'react';
 import Editor from '@monaco-editor/react';
 import { useStore } from '../store/useStore';
-import { useReplicadWorker } from '../hooks/useReplicadWorker';
+import { useFeatureStore } from '../store/useFeatureStore';
+import { featureEvaluator } from '../utils/featureEvaluator';
 
 export function CodeEditor() {
-  const code = useStore((state) => state.code);
-  const updateFromCode = useStore((state) => state.updateFromCode);
+  // Show feature-generated code instead of legacy code
+  const features = useFeatureStore((state) => state.features);
+  const code = featureEvaluator.generateFullCode(features);
+
   const isEvaluating = useStore((state) => state.isEvaluating);
-
-  const { evaluate } = useReplicadWorker();
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastCodeRef = useRef(code);
-
-  // Auto-evaluate code when it changes (debounced)
-  useEffect(() => {
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
-    }
-
-    debounceRef.current = setTimeout(() => {
-      // Only auto-evaluate if the code contains a main function and doesn't return null
-      if (code.includes('function main()') && !code.includes('return null')) {
-        evaluate(code);
-      }
-    }, 800);
-
-    return () => {
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-      }
-    };
-  }, [code, evaluate]);
-
-  const handleChange = (value: string | undefined) => {
-    if (value !== undefined && value !== lastCodeRef.current) {
-      lastCodeRef.current = value;
-      updateFromCode(value);
-    }
-  };
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -81,7 +52,6 @@ export function CodeEditor() {
           defaultLanguage="javascript"
           theme="vs-dark"
           value={code}
-          onChange={handleChange}
           options={{
             minimap: { enabled: false },
             fontSize: 13,
@@ -91,6 +61,7 @@ export function CodeEditor() {
             tabSize: 2,
             wordWrap: 'on',
             padding: { top: 8 },
+            readOnly: true, // Code is generated from features
           }}
         />
       </div>

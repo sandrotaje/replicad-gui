@@ -1,0 +1,214 @@
+import React, { useState, useEffect } from 'react';
+import type { ExtrusionFeature, CutFeature } from '../types';
+
+type EditableFeature = ExtrusionFeature | CutFeature;
+
+interface FeatureEditDialogProps {
+  feature: EditableFeature;
+  onSave: (updates: Partial<EditableFeature>) => void;
+  onCancel: () => void;
+}
+
+export const FeatureEditDialog: React.FC<FeatureEditDialogProps> = ({
+  feature,
+  onSave,
+  onCancel,
+}) => {
+  const [depth, setDepth] = useState<number | 'through'>(feature.depth);
+  const [direction, setDirection] = useState<'normal' | 'reverse' | 'both'>(feature.direction);
+  const [operation, setOperation] = useState<'new' | 'fuse' | 'cut'>(
+    feature.type === 'extrusion' ? feature.operation : 'cut'
+  );
+
+  // Reset form when feature changes
+  useEffect(() => {
+    setDepth(feature.depth);
+    setDirection(feature.direction);
+    if (feature.type === 'extrusion') {
+      setOperation(feature.operation);
+    }
+  }, [feature]);
+
+  const handleSave = () => {
+    const updates: Partial<EditableFeature> = {
+      depth,
+      direction,
+    };
+    if (feature.type === 'extrusion') {
+      (updates as Partial<ExtrusionFeature>).operation = operation;
+    }
+    onSave(updates);
+  };
+
+  const handleDepthChange = (value: string) => {
+    if (value.toLowerCase() === 'through') {
+      setDepth('through');
+    } else {
+      const numValue = parseFloat(value);
+      if (!isNaN(numValue) && numValue > 0) {
+        setDepth(numValue);
+      }
+    }
+  };
+
+  const overlayStyle: React.CSSProperties = {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000,
+  };
+
+  const dialogStyle: React.CSSProperties = {
+    backgroundColor: '#1e1e2e',
+    border: '1px solid #313244',
+    borderRadius: '8px',
+    padding: '20px',
+    minWidth: '300px',
+    maxWidth: '400px',
+    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+  };
+
+  const headerStyle: React.CSSProperties = {
+    fontSize: '16px',
+    fontWeight: 600,
+    color: '#cdd6f4',
+    marginBottom: '16px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  };
+
+  const fieldStyle: React.CSSProperties = {
+    marginBottom: '16px',
+  };
+
+  const labelStyle: React.CSSProperties = {
+    display: 'block',
+    fontSize: '12px',
+    color: '#a6adc8',
+    marginBottom: '6px',
+    fontWeight: 500,
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    padding: '8px 12px',
+    backgroundColor: '#313244',
+    border: '1px solid #45475a',
+    borderRadius: '4px',
+    color: '#cdd6f4',
+    fontSize: '14px',
+    outline: 'none',
+    boxSizing: 'border-box',
+  };
+
+  const selectStyle: React.CSSProperties = {
+    ...inputStyle,
+    cursor: 'pointer',
+  };
+
+  const buttonContainerStyle: React.CSSProperties = {
+    display: 'flex',
+    gap: '8px',
+    justifyContent: 'flex-end',
+    marginTop: '20px',
+  };
+
+  const buttonStyle = (primary: boolean): React.CSSProperties => ({
+    padding: '8px 16px',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontWeight: 500,
+    fontSize: '13px',
+    backgroundColor: primary ? '#89b4fa' : '#313244',
+    color: primary ? '#1e1e2e' : '#cdd6f4',
+    transition: 'opacity 0.2s',
+  });
+
+  return (
+    <div style={overlayStyle} onClick={onCancel}>
+      <div style={dialogStyle} onClick={(e) => e.stopPropagation()}>
+        <div style={headerStyle}>
+          <span>{feature.type === 'extrusion' ? '⬆️' : '✂️'}</span>
+          <span>Edit {feature.name}</span>
+        </div>
+
+        {/* Depth */}
+        <div style={fieldStyle}>
+          <label style={labelStyle}>
+            Depth {feature.type === 'cut' && '(or "through")'}
+          </label>
+          <input
+            type={typeof depth === 'number' ? 'number' : 'text'}
+            value={depth === 'through' ? 'through' : depth}
+            onChange={(e) => handleDepthChange(e.target.value)}
+            style={inputStyle}
+            min={0.1}
+            step={0.5}
+          />
+        </div>
+
+        {/* Direction */}
+        <div style={fieldStyle}>
+          <label style={labelStyle}>Direction</label>
+          <select
+            value={direction}
+            onChange={(e) => setDirection(e.target.value as 'normal' | 'reverse' | 'both')}
+            style={selectStyle}
+          >
+            <option value="normal">Normal (forward)</option>
+            <option value="reverse">Reverse (backward)</option>
+            {feature.type === 'cut' && (
+              <option value="both">Both directions</option>
+            )}
+          </select>
+        </div>
+
+        {/* Operation (extrusion only) */}
+        {feature.type === 'extrusion' && (
+          <div style={fieldStyle}>
+            <label style={labelStyle}>Operation</label>
+            <select
+              value={operation}
+              onChange={(e) => setOperation(e.target.value as 'new' | 'fuse' | 'cut')}
+              style={selectStyle}
+            >
+              <option value="new">New solid</option>
+              <option value="fuse">Fuse with existing</option>
+              <option value="cut">Cut from existing</option>
+            </select>
+          </div>
+        )}
+
+        {/* Buttons */}
+        <div style={buttonContainerStyle}>
+          <button
+            style={buttonStyle(false)}
+            onClick={onCancel}
+            onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.8'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
+          >
+            Cancel
+          </button>
+          <button
+            style={buttonStyle(true)}
+            onClick={handleSave}
+            onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.8'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
+          >
+            Save Changes
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default FeatureEditDialog;
