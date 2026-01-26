@@ -186,33 +186,41 @@ export class FeatureEvaluator {
 
   /**
    * Generate replicad code for a sketch feature
-   * Returns the drawing code for all elements in the sketch
+   * Returns the drawing code for all extrudable elements in the sketch as an array
    */
   generateSketchCode(sketch: SketchFeature): string {
     if (sketch.elements.length === 0) {
-      return 'null /* Empty sketch */';
+      return '[]';
     }
 
-    // For now, only handle first extrudable element
-    // In the future, we could combine multiple elements into a single profile
     const extrudableElements = sketch.elements.filter((e) => this.isExtrudable(e));
 
     if (extrudableElements.length === 0) {
-      // No extrudable elements, return first element as drawing
-      return this.generateElementDrawingCode(sketch.elements[0]);
+      // No extrudable elements, return empty array
+      return '[]';
     }
 
-    // Return the drawing code for the first extrudable element
-    return this.generateElementDrawingCode(extrudableElements[0]);
+    // Return array of drawing codes for all extrudable elements
+    const elementCodes = extrudableElements.map((e) => this.generateElementDrawingCode(e));
+    return `[${elementCodes.join(', ')}]`;
+  }
+
+  /**
+   * Get the center points for all extrudable elements in a sketch
+   */
+  private getExtrudableElementCenters(sketch: SketchFeature): Point[] {
+    const extrudableElements = sketch.elements.filter((e) => this.isExtrudable(e));
+    return extrudableElements.map((e) => this.getElementCenter(e));
   }
 
   /**
    * Generate replicad code for an extrusion feature
+   * Handles multiple elements in a sketch by extruding each and combining them
    * @param extrusion The extrusion feature
-   * @param sketchVarName Variable name of the sketch drawing
+   * @param sketchVarName Variable name of the sketch drawing array
    * @param resultVarName Variable name to assign the result to
    * @param features All features (for looking up parent feature for face sketches)
-   * @returns Generated code string
+   * @returns Generated code string (may be multiple lines)
    */
   generateExtrusionCode(
     extrusion: ExtrusionFeature,
@@ -229,50 +237,86 @@ export class FeatureEvaluator {
     const depth = extrusion.direction === 'reverse' ? -extrusion.depth : extrusion.depth;
     const depthStr = depth.toFixed(2);
 
-    // Generate sketch placement code
-    let sketchOnCode: string;
+    // Get centers for all extrudable elements (for face sketches)
+    const centers = this.getExtrudableElementCenters(sketch);
+    if (centers.length === 0) {
+      return `// ERROR: No extrudable elements in sketch`;
+    }
 
-    if (sketch.reference.type === 'standard') {
-      // Sketch on standard plane
-      const plane = sketch.reference.plane;
-      sketchOnCode = `${sketchVarName}.sketchOnPlane("${plane}")`;
-    } else {
-      // Sketch on face - uses the current result variable
+    const lines: string[] = [];
+
+    // For face sketches with multiple elements and 'cut' operation,
+    // we need to build all shapes BEFORE modifying the solid (face indices change after cuts)
+    if (sketch.reference.type === 'face' && centers.length > 1 && extrusion.operation === 'cut') {
       const faceIndex = sketch.reference.faceIndex;
+      const cutVarName = `${sketchVarName}_cutShape`;
 
-      // Get element center for positioning
-      const center = sketch.elements.length > 0 ? this.getElementCenter(sketch.elements[0]) : { x: 0, y: 0 };
+      // Build first cut shape
+      const firstCenter = centers[0];
+      lines.push(`let ${cutVarName} = sketchOnFace(${sketchVarName}[0], ${resultVarName}, ${faceIndex}, ${firstCenter.x.toFixed(2)}, ${firstCenter.y.toFixed(2)}).extrude(${depthStr});`);
 
-      sketchOnCode = `sketchOnFace(${sketchVarName}, result, ${faceIndex}, ${center.x.toFixed(2)}, ${center.y.toFixed(2)})`;
+      // Fuse remaining cut shapes (all using original result for face reference)
+      for (let i = 1; i < centers.length; i++) {
+        const center = centers[i];
+        lines.push(`${cutVarName} = ${cutVarName}.fuse(sketchOnFace(${sketchVarName}[${i}], ${resultVarName}, ${faceIndex}, ${center.x.toFixed(2)}, ${center.y.toFixed(2)}).extrude(${depthStr}));`);
+      }
+
+      // Apply single cut with combined shape
+      lines.push(`${resultVarName} = ${resultVarName}.cut(${cutVarName});`);
+    } else {
+      // Standard plane or single element or fuse/new operation
+      for (let i = 0; i < centers.length; i++) {
+        const center = centers[i];
+        let sketchOnCode: string;
+
+        if (sketch.reference.type === 'standard') {
+          const plane = sketch.reference.plane;
+          sketchOnCode = `${sketchVarName}[${i}].sketchOnPlane("${plane}")`;
+        } else {
+          const faceIndex = sketch.reference.faceIndex;
+          sketchOnCode = `sketchOnFace(${sketchVarName}[${i}], ${resultVarName}, ${faceIndex}, ${center.x.toFixed(2)}, ${center.y.toFixed(2)})`;
+        }
+
+        const extrudeCode = `${sketchOnCode}.extrude(${depthStr})`;
+
+        if (i === 0) {
+          // First element
+          switch (extrusion.operation) {
+            case 'new':
+              lines.push(`${resultVarName} = ${extrudeCode};`);
+              break;
+            case 'fuse':
+              lines.push(`${resultVarName} = ${resultVarName}.fuse(${extrudeCode});`);
+              break;
+            case 'cut':
+              lines.push(`${resultVarName} = ${resultVarName}.cut(${extrudeCode});`);
+              break;
+            default:
+              lines.push(`${resultVarName} = ${extrudeCode};`);
+          }
+        } else {
+          // Subsequent elements - always fuse with the result for 'new' and 'fuse', cut for 'cut'
+          if (extrusion.operation === 'cut') {
+            lines.push(`${resultVarName} = ${resultVarName}.cut(${extrudeCode});`);
+          } else {
+            lines.push(`${resultVarName} = ${resultVarName}.fuse(${extrudeCode});`);
+          }
+        }
+      }
     }
 
-    // Generate extrusion code
-    const extrudeCode = `${sketchOnCode}.extrude(${depthStr})`;
-
-    // Handle operation type
-    switch (extrusion.operation) {
-      case 'new':
-        return `${resultVarName} = ${extrudeCode};`;
-
-      case 'fuse':
-        return `${resultVarName} = ${resultVarName}.fuse(${extrudeCode});`;
-
-      case 'cut':
-        return `${resultVarName} = ${resultVarName}.cut(${extrudeCode});`;
-
-      default:
-        return `${resultVarName} = ${extrudeCode};`;
-    }
+    return lines.join('\n  ');
   }
 
   /**
    * Generate replicad code for a cut feature
    * Similar to extrusion but always performs a cut operation
+   * Handles multiple elements in a sketch by cutting each
    * @param cut The cut feature
-   * @param sketchVarName Variable name of the sketch drawing
+   * @param sketchVarName Variable name of the sketch drawing array
    * @param resultVarName Variable name to assign the result to
    * @param features All features (for looking up sketch info)
-   * @returns Generated code string
+   * @returns Generated code string (may be multiple lines)
    */
   generateCutCode(
     cut: CutFeature,
@@ -323,26 +367,53 @@ export class FeatureEvaluator {
 
     const depthStr = depth.toFixed(2);
 
-    // Generate sketch placement code
-    let sketchOnCode: string;
-
-    if (sketch.reference.type === 'standard') {
-      // Sketch on standard plane
-      const plane = sketch.reference.plane;
-      sketchOnCode = `${sketchVarName}.sketchOnPlane("${plane}")`;
-    } else {
-      // Sketch on face
-      const faceIndex = sketch.reference.faceIndex;
-
-      // Get element center for positioning
-      const center = sketch.elements.length > 0 ? this.getElementCenter(sketch.elements[0]) : { x: 0, y: 0 };
-
-      sketchOnCode = `sketchOnFace(${sketchVarName}, result, ${faceIndex}, ${center.x.toFixed(2)}, ${center.y.toFixed(2)})`;
+    // Get centers for all extrudable elements
+    const centers = this.getExtrudableElementCenters(sketch);
+    if (centers.length === 0) {
+      return `// ERROR: No extrudable elements in sketch`;
     }
 
-    // Always perform a cut operation
-    const extrudeCode = `${sketchOnCode}.extrude(${depthStr})`;
-    return `${resultVarName} = ${resultVarName}.cut(${extrudeCode});`;
+    const lines: string[] = [];
+
+    // For face sketches with multiple elements, we need to build all cut shapes
+    // BEFORE modifying the solid, because face indices change after each cut.
+    // We fuse all cut shapes together and then cut once.
+    if (sketch.reference.type === 'face' && centers.length > 1) {
+      const faceIndex = sketch.reference.faceIndex;
+      const cutVarName = `${sketchVarName}_cutShape`;
+
+      // Build first cut shape
+      const firstCenter = centers[0];
+      lines.push(`let ${cutVarName} = sketchOnFace(${sketchVarName}[0], ${resultVarName}, ${faceIndex}, ${firstCenter.x.toFixed(2)}, ${firstCenter.y.toFixed(2)}).extrude(${depthStr});`);
+
+      // Fuse remaining cut shapes (all using original result for face reference)
+      for (let i = 1; i < centers.length; i++) {
+        const center = centers[i];
+        lines.push(`${cutVarName} = ${cutVarName}.fuse(sketchOnFace(${sketchVarName}[${i}], ${resultVarName}, ${faceIndex}, ${center.x.toFixed(2)}, ${center.y.toFixed(2)}).extrude(${depthStr}));`);
+      }
+
+      // Apply single cut with combined shape
+      lines.push(`${resultVarName} = ${resultVarName}.cut(${cutVarName});`);
+    } else {
+      // Standard plane or single element - original approach works fine
+      for (let i = 0; i < centers.length; i++) {
+        const center = centers[i];
+        let sketchOnCode: string;
+
+        if (sketch.reference.type === 'standard') {
+          const plane = sketch.reference.plane;
+          sketchOnCode = `${sketchVarName}[${i}].sketchOnPlane("${plane}")`;
+        } else {
+          const faceIndex = sketch.reference.faceIndex;
+          sketchOnCode = `sketchOnFace(${sketchVarName}[${i}], ${resultVarName}, ${faceIndex}, ${center.x.toFixed(2)}, ${center.y.toFixed(2)})`;
+        }
+
+        const extrudeCode = `${sketchOnCode}.extrude(${depthStr})`;
+        lines.push(`${resultVarName} = ${resultVarName}.cut(${extrudeCode});`);
+      }
+    }
+
+    return lines.join('\n  ');
   }
 
   /**
