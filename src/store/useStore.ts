@@ -565,55 +565,15 @@ function main() {
 
   setMeshData: (meshData) => set({ meshData }),
   setShapeData: (shapeData) => {
-    const state = get();
-
-    // Recompute face outline if we're on a face plane
-    let faceOutline: Point[] | null = null;
-    if (typeof state.sketchPlane !== 'string' && shapeData) {
-      const faceIndex = state.sketchPlane.faceIndex;
-      const face = shapeData.individualFaces.find((f) => f.faceIndex === faceIndex);
-
-      if (face?.isPlanar && face.plane) {
-        const { origin, xDir, normal } = face.plane;
-
-        // Compute yDir = normal × xDir (to match Replicad's face coordinate system)
-        const yDir: [number, number, number] = [
-          normal[1] * xDir[2] - normal[2] * xDir[1],
-          normal[2] * xDir[0] - normal[0] * xDir[2],
-          normal[0] * xDir[1] - normal[1] * xDir[0],
-        ];
-
-        // Project all vertices to 2D
-        const points2D: Point[] = [];
-        const seen = new Set<string>();
-
-        for (let i = 0; i < face.vertices.length; i += 3) {
-          const vx = face.vertices[i] - origin[0];
-          const vy = face.vertices[i + 1] - origin[1];
-          const vz = face.vertices[i + 2] - origin[2];
-
-          const localX = vx * xDir[0] + vy * xDir[1] + vz * xDir[2];
-          const localY = vx * yDir[0] + vy * yDir[1] + vz * yDir[2];
-
-          const key = `${localX.toFixed(4)},${localY.toFixed(4)}`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            points2D.push({ x: localX, y: localY });
-          }
-        }
-
-        if (points2D.length >= 3) {
-          const hull = computeConvexHull(points2D);
-          // Use raw face-local coordinates to match 3D space
-          faceOutline = hull;
-        }
-      }
-    }
+    // Don't recalculate faceOutline when shape changes - it should be set by
+    // startSketchOnFace or useFeatureSketchSync and preserved during editing.
+    // Face indices change after features are applied, so looking up by index
+    // would give the wrong face.
 
     set({
       shapeData,
       meshData: shapeData?.mesh ?? null,
-      faceOutline,
+      // Preserve existing faceOutline - don't overwrite it
       // Clear selection when shape changes
       selectedFaceIndices: new Set(),
       selectedEdgeIndices: new Set(),
