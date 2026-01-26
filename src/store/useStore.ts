@@ -604,15 +604,8 @@ function main() {
 
         if (points2D.length >= 3) {
           const hull = computeConvexHull(points2D);
-
-          // Shift the outline so that (0,0) is at the corner
-          const minX = Math.min(...hull.map(p => p.x));
-          const minY = Math.min(...hull.map(p => p.y));
-
-          faceOutline = hull.map(p => ({
-            x: p.x - minX,
-            y: p.y - minY,
-          }));
+          // Use raw face-local coordinates to match 3D space
+          faceOutline = hull;
         }
       }
     }
@@ -698,15 +691,15 @@ function main() {
         console.log('[Store] Using actual boundary points from outerWire:', faceOutline.length, 'points');
       } else if (bounds2D) {
         // Fallback: use bounds2D to create a rectangular outline
+        // Use raw face-local coordinates to match 3D space
         faceWidth = bounds2D.maxX - bounds2D.minX;
         faceHeight = bounds2D.maxY - bounds2D.minY;
 
-        // Create rectangular outline from bounds (already shifted to 0,0 corner)
         faceOutline = [
-          { x: 0, y: 0 },
-          { x: faceWidth, y: 0 },
-          { x: faceWidth, y: faceHeight },
-          { x: 0, y: faceHeight },
+          { x: bounds2D.minX, y: bounds2D.minY },
+          { x: bounds2D.maxX, y: bounds2D.minY },
+          { x: bounds2D.maxX, y: bounds2D.maxY },
+          { x: bounds2D.minX, y: bounds2D.maxY },
         ];
 
         console.log('[Store] Using bounds2D for rectangular outline');
@@ -755,11 +748,8 @@ function main() {
           faceWidth = maxX - minX;
           faceHeight = maxY - minY;
 
-          // Shift the outline so that (0,0) is at the corner
-          faceOutline = hull.map(p => ({
-            x: p.x - minX,
-            y: p.y - minY,
-          }));
+          // Use raw face-local coordinates to match 3D space
+          faceOutline = hull;
 
           console.log('[Store] Fallback: using convex hull from mesh vertices');
         }

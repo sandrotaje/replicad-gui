@@ -424,23 +424,18 @@ function extractShapeData(shape: unknown) {
                         }
 
                         // Project 3D boundary to 2D using face coordinate system
+                        // Use raw face-local coordinates to match 3D space
                         const seen2D = new Set<string>();
                         boundaryPoints2D = [];
-                        const faceHeight = maxY - minY;
 
                         for (const pt of boundary3D) {
-                          // Project to face-local coordinates
+                          // Project to face-local coordinates (relative to face origin)
                           const local = projectToFaceCoords(pt, origin, xAxis, yAxis);
 
-                          // Shift so (0,0) is at the corner (using bounds)
-                          const shiftedX = local.x - minX;
-                          // Flip Y to match sketch display (Y up) vs Replicad's coordinate system
-                          const shiftedY = faceHeight - (local.y - minY);
-
-                          const key = `${shiftedX.toFixed(4)},${shiftedY.toFixed(4)}`;
+                          const key = `${local.x.toFixed(4)},${local.y.toFixed(4)}`;
                           if (!seen2D.has(key)) {
                             seen2D.add(key);
-                            boundaryPoints2D.push({ x: shiftedX, y: shiftedY });
+                            boundaryPoints2D.push({ x: local.x, y: local.y });
                           }
                         }
 

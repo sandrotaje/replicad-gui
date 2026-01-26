@@ -8,7 +8,7 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '../store/useStore';
 import { useFeatureStore } from '../store/useFeatureStore';
-import type { SketchFeature, SketchElement, StandardPlane } from '../types';
+import type { SketchFeature, SketchElement, FacePlane } from '../types';
 
 export function useFeatureSketchSync() {
   const syncInProgressRef = useRef(false);
@@ -35,12 +35,31 @@ export function useFeatureSketchSync() {
     syncInProgressRef.current = true;
 
     // Set up the legacy store's sketch plane based on the feature's reference
-    const plane: StandardPlane = editingSketch.reference.type === 'standard'
-      ? editingSketch.reference.plane
-      : 'XY'; // Default to XY for face sketches (the Sketcher handles coordinate transformation)
+    if (editingSketch.reference.type === 'standard') {
+      useStore.getState().setSketchPlane(editingSketch.reference.plane);
+    } else {
+      // Face sketch - construct FacePlane and set faceOutline from cached data
+      const faceRef = editingSketch.reference;
+      const boundaryPoints = faceRef.boundaryPoints;
 
-    // Use the store's setSketchPlane directly
-    useStore.getState().setSketchPlane(plane);
+      // Calculate dimensions from boundary (boundary is centered around 0,0)
+      const minX = Math.min(...boundaryPoints.map(p => p.x));
+      const maxX = Math.max(...boundaryPoints.map(p => p.x));
+      const minY = Math.min(...boundaryPoints.map(p => p.y));
+      const maxY = Math.max(...boundaryPoints.map(p => p.y));
+
+      const facePlane: FacePlane = {
+        type: 'face',
+        faceIndex: faceRef.faceIndex,
+        faceWidth: maxX - minX,
+        faceHeight: maxY - minY,
+      };
+
+      useStore.setState({
+        sketchPlane: facePlane,
+        faceOutline: boundaryPoints,
+      });
+    }
 
     // Clear legacy elements and load sketch elements
     // This is a one-time sync when editing starts
@@ -97,10 +116,11 @@ export function useFeatureSketchSync() {
     return () => {
       // When editing stops, clear the legacy store
       if (!editingSketchId) {
-        // Clear elements but keep the plane
+        // Clear elements and face outline
         useStore.setState({
           elements: [],
           lastUpdateSource: null,
+          faceOutline: null,
         });
         lastSyncedElementsRef.current = '';
       }
