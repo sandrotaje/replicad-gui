@@ -91,13 +91,14 @@ export function useKeyboardShortcuts() {
     const editingSketch = getEditingSketch();
     if (!editingSketch) return;
 
-    // Check if there are extrudable elements (rectangles or circles)
-    const extrudableElements = editingSketch.elements.filter(
+    // Check if there are extrudable elements (rectangles, circles, or closed profiles)
+    const standaloneExtrudables = editingSketch.elements.filter(
       (e) => e.type === 'rectangle' || e.type === 'circle'
     );
+    const closedProfileCount = editingSketch.closedProfiles?.length ?? 0;
 
-    if (extrudableElements.length === 0) {
-      console.log('[Keyboard] Cannot extrude: No extrudable elements in sketch');
+    if (standaloneExtrudables.length === 0 && closedProfileCount === 0) {
+      console.log('[Keyboard] Cannot extrude: No extrudable elements or closed profiles in sketch');
       return;
     }
 
@@ -125,13 +126,14 @@ export function useKeyboardShortcuts() {
     const editingSketch = getEditingSketch();
     if (!editingSketch) return;
 
-    // Check if there are extrudable elements
-    const extrudableElements = editingSketch.elements.filter(
+    // Check if there are extrudable elements (rectangles, circles, or closed profiles)
+    const standaloneExtrudables = editingSketch.elements.filter(
       (e) => e.type === 'rectangle' || e.type === 'circle'
     );
+    const closedProfileCount = editingSketch.closedProfiles?.length ?? 0;
 
-    if (extrudableElements.length === 0) {
-      console.log('[Keyboard] Cannot cut: No extrudable elements in sketch');
+    if (standaloneExtrudables.length === 0 && closedProfileCount === 0) {
+      console.log('[Keyboard] Cannot cut: No extrudable elements or closed profiles in sketch');
       return;
     }
 

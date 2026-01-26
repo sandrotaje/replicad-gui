@@ -9,6 +9,7 @@ import type {
   SketchTool,
   Point,
   OperationType,
+  ClosedProfileGroup,
 } from '../types';
 import { parseElementsFromCode } from '../utils/codeParser';
 
@@ -61,6 +62,9 @@ interface AppState {
   // Face outline for current face plane (2D points in sketch coordinates)
   faceOutline: Point[] | null;
 
+  // Detected closed profiles from chained elements (for visual feedback and sync)
+  detectedClosedProfiles: ClosedProfileGroup[];
+
   // Sync tracking (to prevent infinite loops)
   lastUpdateSource: UpdateSource;
 
@@ -98,6 +102,9 @@ interface AppState {
   setHoveredFace: (index: number | null) => void;
   setHoveredEdge: (index: number | null) => void;
   clearSelection: () => void;
+
+  // Closed profile detection
+  setDetectedClosedProfiles: (profiles: ClosedProfileGroup[]) => void;
 }
 
 // Helper to get a unique key for a plane (for grouping)
@@ -439,6 +446,7 @@ function main() {
   planeOperations: new Map<string, OperationType>(),
   sketchPlane: 'XY' as SketchPlane,
   faceOutline: null,
+  detectedClosedProfiles: [],
   lastUpdateSource: null,
 
   // Actions
@@ -804,6 +812,9 @@ function main() {
       hoveredFaceIndex: null,
       hoveredEdgeIndex: null,
     }),
+
+  // Closed profile detection
+  setDetectedClosedProfiles: (profiles) => set({ detectedClosedProfiles: profiles }),
 }));
 
 // Helper to get the orientation of a plane (which standard plane it's parallel to)

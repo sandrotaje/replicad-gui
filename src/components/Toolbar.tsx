@@ -37,10 +37,12 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
     ? features.find(f => f.id === editingSketchId) as SketchFeature | undefined
     : undefined;
 
-  // Count extrudable elements in the current sketch
-  const extrudableElementCount = editingSketch
+  // Count extrudable elements in the current sketch (standalone shapes + closed profiles)
+  const standaloneExtrudableCount = editingSketch
     ? editingSketch.elements.filter(e => e.type === 'rectangle' || e.type === 'circle').length
     : 0;
+  const closedProfileCount = editingSketch?.closedProfiles?.length ?? 0;
+  const extrudableElementCount = standaloneExtrudableCount + closedProfileCount;
 
   const buttonStyle = (isActive: boolean) => ({
     padding: '8px 12px',

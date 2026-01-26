@@ -88,6 +88,13 @@ export type SketchElement =
   | ArcElement
   | SplineElement;
 
+// Group of elements forming a closed profile (for extrusion/cutting)
+export interface ClosedProfileGroup {
+  id: string;
+  elementIds: string[];  // Ordered list of element IDs forming the closed loop
+  isClosed: boolean;     // Validated as actually closed
+}
+
 // Tool types for the sketcher
 export type SketchTool =
   | 'select'
@@ -225,7 +232,8 @@ export interface SketchFeature extends FeatureBase {
   type: 'sketch';
   reference: SketchReference;      // Where the sketch lives
   elements: SketchElement[];       // 2D sketch elements (existing type)
-  isClosed: boolean;               // Is the sketch a closed profile?
+  isClosed: boolean;               // Is the sketch a closed profile? (legacy, for single-element profiles)
+  closedProfiles?: ClosedProfileGroup[];  // Detected closed profiles from chained elements
 }
 
 // Extrusion Feature - extrudes a sketch

@@ -9,6 +9,10 @@ import type {
   VLineElement,
   SketchTool,
 } from '../types';
+import {
+  detectClosedProfiles,
+  getElementEndpoints,
+} from '../utils/closedFigureDetection';
 
 const GRID_SIZE = 10;
 
@@ -81,6 +85,18 @@ export function Sketcher() {
     () => elements.filter((e) => planesEqual(e.plane, sketchPlane)),
     [elements, sketchPlane]
   );
+
+  // Detect closed profiles whenever current plane elements change
+  const detectedClosedProfiles = useMemo(
+    () => detectClosedProfiles(currentPlaneElements),
+    [currentPlaneElements]
+  );
+
+  // Notify store of detected closed profiles for feature sync
+  const setDetectedClosedProfiles = useStore((state) => state.setDetectedClosedProfiles);
+  useEffect(() => {
+    setDetectedClosedProfiles?.(detectedClosedProfiles);
+  }, [detectedClosedProfiles, setDetectedClosedProfiles]);
 
   // Elements on parallel planes (same orientation, different plane - shown dimmed)
   // For standard planes: show elements from same orientation
@@ -571,6 +587,58 @@ export function Sketcher() {
     // Draw elements from other planes with same orientation (dimmed)
     otherPlaneElements.forEach((elem) => drawElement(ctx, elem, true));
 
+    // Draw closed profile highlights (before elements so elements appear on top)
+    if (detectedClosedProfiles.length > 0) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(166, 227, 161, 0.15)'; // Light green transparent
+      ctx.strokeStyle = 'rgba(166, 227, 161, 0.5)'; // Green outline
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+
+      for (const profile of detectedClosedProfiles) {
+        // Collect all the points along the profile
+        const profilePoints: Point[] = [];
+
+        for (const elemId of profile.elementIds) {
+          const elem = currentPlaneElements.find((e) => e.id === elemId);
+          if (!elem) continue;
+
+          const endpoints = getElementEndpoints(elem);
+          if (endpoints) {
+            // Add start point if it's the first or not close to the last added point
+            if (
+              profilePoints.length === 0 ||
+              Math.hypot(
+                endpoints.start.x - profilePoints[profilePoints.length - 1].x,
+                endpoints.start.y - profilePoints[profilePoints.length - 1].y
+              ) > 0.5
+            ) {
+              profilePoints.push(endpoints.start);
+            }
+            profilePoints.push(endpoints.end);
+          }
+        }
+
+        // Draw the filled polygon
+        if (profilePoints.length >= 3) {
+          ctx.beginPath();
+          const first = worldToScreen(profilePoints[0].x, profilePoints[0].y);
+          ctx.moveTo(first.x, first.y);
+
+          for (let i = 1; i < profilePoints.length; i++) {
+            const pt = worldToScreen(profilePoints[i].x, profilePoints[i].y);
+            ctx.lineTo(pt.x, pt.y);
+          }
+
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        }
+      }
+
+      ctx.restore();
+    }
+
     // Draw elements on current plane
     currentPlaneElements.forEach((elem) => drawElement(ctx, elem, false));
 
@@ -786,6 +854,7 @@ export function Sketcher() {
   }, [
     currentPlaneElements,
     otherPlaneElements,
+    detectedClosedProfiles,
     faceOutline,
     isDrawing,
     startPoint,

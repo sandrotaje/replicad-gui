@@ -275,7 +275,13 @@ const FeatureItem: React.FC<FeatureItemProps> = ({
           ? `${sketch.reference.plane} Plane`
           : `Face`;
         const elemCount = sketch.elements.length;
-        return `${refType} - ${elemCount} element${elemCount !== 1 ? 's' : ''}`;
+        const profileCount = sketch.closedProfiles?.length ?? 0;
+
+        let details = `${refType} - ${elemCount} element${elemCount !== 1 ? 's' : ''}`;
+        if (profileCount > 0) {
+          details += `, ${profileCount} closed profile${profileCount !== 1 ? 's' : ''}`;
+        }
+        return details;
       }
       case 'extrusion': {
         const ext = feature as ExtrusionFeature;

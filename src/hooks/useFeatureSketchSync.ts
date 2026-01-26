@@ -78,6 +78,9 @@ export function useFeatureSketchSync() {
     syncInProgressRef.current = false;
   }, [editingSketchId]); // Only re-run when editing starts/stops
 
+  // Get detected closed profiles from the legacy store
+  const detectedClosedProfiles = useStore((state) => state.detectedClosedProfiles);
+
   // Sync from legacy store to feature store when elements change
   useEffect(() => {
     if (!editingSketchId || syncInProgressRef.current) return;
@@ -110,6 +113,24 @@ export function useFeatureSketchSync() {
 
     lastSyncedElementsRef.current = currentElementsJson;
   }, [editingSketchId, legacyElements, features, addSketchElement, updateFeature]);
+
+  // Sync closed profiles from legacy store to feature store
+  useEffect(() => {
+    if (!editingSketchId || syncInProgressRef.current) return;
+
+    // Update the feature store with detected closed profiles
+    const currentSketch = features.find((f) => f.id === editingSketchId) as SketchFeature | undefined;
+    if (!currentSketch) return;
+
+    // Only update if profiles have actually changed
+    const currentProfilesJson = JSON.stringify(currentSketch.closedProfiles || []);
+    const newProfilesJson = JSON.stringify(detectedClosedProfiles);
+    if (currentProfilesJson !== newProfilesJson) {
+      updateFeature(editingSketchId, {
+        closedProfiles: detectedClosedProfiles,
+      });
+    }
+  }, [editingSketchId, detectedClosedProfiles, features, updateFeature]);
 
   // Clean up when editing stops
   useEffect(() => {

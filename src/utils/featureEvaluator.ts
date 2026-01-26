@@ -15,7 +15,13 @@ import type {
   SketchElement,
   Point,
   ShapeData,
+  ClosedProfileGroup,
 } from '../types';
+import {
+  getElementEndpoints,
+  getProfileStartPoint,
+  getProfileCenter,
+} from './closedFigureDetection';
 
 // ============ Result Types ============
 
@@ -137,6 +143,153 @@ export class FeatureEvaluator {
   }
 
   /**
+   * Generate a drawing command for a single element as part of a chain
+   * This returns the chained command (without draw() or .close())
+   * The element is drawn from its start point to its end point
+   */
+  private getChainedDrawingCommand(
+    element: SketchElement,
+    prevEndpoint: Point
+  ): string {
+    const endpoints = getElementEndpoints(element);
+    if (!endpoints) return '';
+
+    // Determine if we need to traverse the element in reverse
+    // (if prevEndpoint is closer to element's end than start)
+    const distToStart = Math.hypot(
+      prevEndpoint.x - endpoints.start.x,
+      prevEndpoint.y - endpoints.start.y
+    );
+    const distToEnd = Math.hypot(
+      prevEndpoint.x - endpoints.end.x,
+      prevEndpoint.y - endpoints.end.y
+    );
+    const reversed = distToEnd < distToStart;
+
+    switch (element.type) {
+      case 'line': {
+        const targetPoint = reversed ? endpoints.start : endpoints.end;
+        return `.lineTo([${targetPoint.x.toFixed(2)}, ${targetPoint.y.toFixed(2)}])`;
+      }
+
+      case 'hline': {
+        const targetX = reversed ? element.start.x : element.start.x + element.length;
+        return `.hLineTo(${targetX.toFixed(2)})`;
+      }
+
+      case 'vline': {
+        const targetY = reversed ? element.start.y : element.start.y + element.length;
+        return `.vLineTo(${targetY.toFixed(2)})`;
+      }
+
+      case 'arc': {
+        const { center, radius, startAngle, endAngle } = element;
+        // Calculate arc points
+        const arcStart = {
+          x: center.x + radius * Math.cos(startAngle),
+          y: center.y + radius * Math.sin(startAngle),
+        };
+        const arcEnd = {
+          x: center.x + radius * Math.cos(endAngle),
+          y: center.y + radius * Math.sin(endAngle),
+        };
+        const midAngle = (startAngle + endAngle) / 2;
+        const arcMid = {
+          x: center.x + radius * Math.cos(midAngle),
+          y: center.y + radius * Math.sin(midAngle),
+        };
+
+        if (reversed) {
+          // Draw from arc end to arc start, through mid point
+          return `.threePointsArcTo([${arcStart.x.toFixed(2)}, ${arcStart.y.toFixed(2)}], [${arcMid.x.toFixed(2)}, ${arcMid.y.toFixed(2)}])`;
+        } else {
+          return `.threePointsArcTo([${arcEnd.x.toFixed(2)}, ${arcEnd.y.toFixed(2)}], [${arcMid.x.toFixed(2)}, ${arcMid.y.toFixed(2)}])`;
+        }
+      }
+
+      case 'spline': {
+        if (element.points.length < 2) return '';
+        const orderedPoints = reversed
+          ? [...element.points].reverse()
+          : element.points;
+        // Skip the first point (we're already there), draw through the rest
+        const remainingPoints = orderedPoints.slice(1);
+        if (remainingPoints.length === 0) return '';
+        const pointsStr = remainingPoints
+          .map((p) => `[${p.x.toFixed(2)}, ${p.y.toFixed(2)}]`)
+          .join(', ');
+        return `.smoothSplineTo(${pointsStr})`;
+      }
+
+      default:
+        return '';
+    }
+  }
+
+  /**
+   * Generate drawing code for a closed profile (chain of elements)
+   * Returns draw().commands...close() that forms a closed extrudable shape
+   */
+  private generateClosedProfileDrawingCode(
+    profile: ClosedProfileGroup,
+    elements: SketchElement[]
+  ): string | null {
+    if (profile.elementIds.length === 0 || !profile.isClosed) {
+      return null;
+    }
+
+    // Get the elements in order
+    const orderedElements: SketchElement[] = [];
+    for (const id of profile.elementIds) {
+      const elem = elements.find((e) => e.id === id);
+      if (elem) {
+        orderedElements.push(elem);
+      }
+    }
+
+    if (orderedElements.length === 0) {
+      return null;
+    }
+
+    // Get start point from the first element
+    const startPoint = getProfileStartPoint(profile, elements);
+    if (!startPoint) {
+      return null;
+    }
+
+    // Build the drawing commands
+    let code = `draw([${startPoint.x.toFixed(2)}, ${startPoint.y.toFixed(2)}])`;
+    let currentEndpoint = startPoint;
+
+    for (const element of orderedElements) {
+      const command = this.getChainedDrawingCommand(element, currentEndpoint);
+      if (command) {
+        code += command;
+      }
+
+      // Update current endpoint
+      const endpoints = getElementEndpoints(element);
+      if (endpoints) {
+        // Determine which endpoint we're now at
+        const distToStart = Math.hypot(
+          currentEndpoint.x - endpoints.start.x,
+          currentEndpoint.y - endpoints.start.y
+        );
+        const distToEnd = Math.hypot(
+          currentEndpoint.x - endpoints.end.x,
+          currentEndpoint.y - endpoints.end.y
+        );
+        currentEndpoint = distToEnd < distToStart ? endpoints.start : endpoints.end;
+      }
+    }
+
+    // Close the profile
+    code += '.close()';
+
+    return code;
+  }
+
+  /**
    * Get the center point for positioning an element when sketching on a face
    */
   private getElementCenter(element: SketchElement): Point {
@@ -187,30 +340,58 @@ export class FeatureEvaluator {
   /**
    * Generate replicad code for a sketch feature
    * Returns the drawing code for all extrudable elements in the sketch as an array
+   * Includes both standalone extrudables (rectangle, circle) and closed profiles
    */
   generateSketchCode(sketch: SketchFeature): string {
     if (sketch.elements.length === 0) {
       return '[]';
     }
 
-    const extrudableElements = sketch.elements.filter((e) => this.isExtrudable(e));
+    const codes: string[] = [];
 
-    if (extrudableElements.length === 0) {
-      // No extrudable elements, return empty array
+    // Add standalone extrudable elements (rectangle, circle)
+    const standaloneExtrudables = sketch.elements.filter((e) => this.isExtrudable(e));
+    for (const elem of standaloneExtrudables) {
+      codes.push(this.generateElementDrawingCode(elem));
+    }
+
+    // Add closed profiles formed by chained elements
+    if (sketch.closedProfiles && sketch.closedProfiles.length > 0) {
+      for (const profile of sketch.closedProfiles) {
+        const profileCode = this.generateClosedProfileDrawingCode(profile, sketch.elements);
+        if (profileCode) {
+          codes.push(profileCode);
+        }
+      }
+    }
+
+    if (codes.length === 0) {
       return '[]';
     }
 
-    // Return array of drawing codes for all extrudable elements
-    const elementCodes = extrudableElements.map((e) => this.generateElementDrawingCode(e));
-    return `[${elementCodes.join(', ')}]`;
+    return `[${codes.join(', ')}]`;
   }
 
   /**
-   * Get the center points for all extrudable elements in a sketch
+   * Get the center points for all extrudable elements and closed profiles in a sketch
    */
   private getExtrudableElementCenters(sketch: SketchFeature): Point[] {
-    const extrudableElements = sketch.elements.filter((e) => this.isExtrudable(e));
-    return extrudableElements.map((e) => this.getElementCenter(e));
+    const centers: Point[] = [];
+
+    // Add centers for standalone extrudable elements
+    const standaloneExtrudables = sketch.elements.filter((e) => this.isExtrudable(e));
+    for (const elem of standaloneExtrudables) {
+      centers.push(this.getElementCenter(elem));
+    }
+
+    // Add centers for closed profiles
+    if (sketch.closedProfiles && sketch.closedProfiles.length > 0) {
+      for (const profile of sketch.closedProfiles) {
+        centers.push(getProfileCenter(profile, sketch.elements));
+      }
+    }
+
+    return centers;
   }
 
   /**
