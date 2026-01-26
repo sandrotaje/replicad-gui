@@ -8,10 +8,12 @@ import type { Feature, SketchFeature, ExtrusionFeature, CutFeature } from '../ty
  * Shortcuts:
  * - Ctrl/Cmd + Z: Undo
  * - Ctrl/Cmd + Shift + Z or Ctrl/Cmd + Y: Redo
+ * - Ctrl/Cmd + S: Save project to localStorage
  * - Delete/Backspace: Delete active feature (with confirmation)
  * - Escape: Stop editing sketch, deselect active feature
  * - S: Start new sketch (when not editing)
  * - E: Extrude current sketch (when editing a sketch with elements)
+ * - X: Cut with current sketch (when editing a sketch with elements)
  */
 export function useKeyboardShortcuts() {
   const undo = useFeatureStore((state) => state.undo);
@@ -27,6 +29,7 @@ export function useKeyboardShortcuts() {
   const addFeature = useFeatureStore((state) => state.addFeature);
   const generateUniqueName = useFeatureStore((state) => state.generateUniqueName);
   const features = useFeatureStore((state) => state.features);
+  const saveToLocalStorage = useFeatureStore((state) => state.saveToLocalStorage);
 
   /**
    * Check if the currently focused element is an input field (text input, textarea, etc.)
@@ -196,6 +199,14 @@ export function useKeyboardShortcuts() {
         return;
       }
 
+      // Save: Ctrl/Cmd + S
+      if (modKey && e.key.toLowerCase() === 's' && !e.shiftKey) {
+        e.preventDefault();
+        saveToLocalStorage();
+        console.log('[Keyboard] Project saved');
+        return;
+      }
+
       // Skip single-key shortcuts if input is focused
       if (isInputFocused()) {
         return;
@@ -273,6 +284,7 @@ export function useKeyboardShortcuts() {
     handleExtrude,
     handleCut,
     handleDeleteFeature,
+    saveToLocalStorage,
   ]);
 }
 

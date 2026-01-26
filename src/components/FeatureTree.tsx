@@ -10,6 +10,176 @@ import type {
   FilletFeature,
 } from '../types';
 
+// ============ PROJECT MENU COMPONENT ============
+
+interface ProjectMenuProps {
+  isOpen: boolean;
+  onClose: () => void;
+  anchorPosition: { left: number; top: number } | null;
+}
+
+const ProjectMenu: React.FC<ProjectMenuProps> = ({ isOpen, onClose, anchorPosition }) => {
+  const features = useFeatureStore((state) => state.features);
+  const saveToLocalStorage = useFeatureStore((state) => state.saveToLocalStorage);
+  const loadFromLocalStorage = useFeatureStore((state) => state.loadFromLocalStorage);
+  const clearProject = useFeatureStore((state) => state.clearProject);
+  const hasSavedProject = useFeatureStore((state) => state.hasSavedProject);
+  const getSavedProjectInfo = useFeatureStore((state) => state.getSavedProjectInfo);
+
+  // Compute savedInfo directly when open (no useEffect needed)
+  const savedInfo = isOpen ? getSavedProjectInfo() : null;
+
+  if (!isOpen || !anchorPosition) return null;
+
+  const { left, top } = anchorPosition;
+
+  const menuStyle: React.CSSProperties = {
+    position: 'fixed',
+    left,
+    top,
+    backgroundColor: '#1e1e2e',
+    border: '1px solid #313244',
+    borderRadius: '6px',
+    padding: '4px 0',
+    zIndex: 1000,
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.4)',
+    minWidth: '180px',
+  };
+
+  const menuItemStyle: React.CSSProperties = {
+    padding: '8px 16px',
+    cursor: 'pointer',
+    fontSize: '13px',
+    color: '#cdd6f4',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    transition: 'background-color 0.15s',
+  };
+
+  const disabledItemStyle: React.CSSProperties = {
+    ...menuItemStyle,
+    opacity: 0.5,
+    cursor: 'not-allowed',
+  };
+
+  const dividerStyle: React.CSSProperties = {
+    height: '1px',
+    backgroundColor: '#313244',
+    margin: '4px 8px',
+  };
+
+  const handleSave = () => {
+    saveToLocalStorage();
+    onClose();
+  };
+
+  const handleLoad = () => {
+    if (features.length > 0) {
+      const confirmed = window.confirm(
+        'Loading will replace your current project. Are you sure?'
+      );
+      if (!confirmed) return;
+    }
+    loadFromLocalStorage();
+    onClose();
+  };
+
+  const handleNew = () => {
+    if (features.length > 0) {
+      const confirmed = window.confirm(
+        'This will clear your current project. Save first?'
+      );
+      if (confirmed) {
+        saveToLocalStorage();
+      }
+    }
+    clearProject();
+    onClose();
+  };
+
+  const formatDate = (timestamp: number) => {
+    return new Date(timestamp).toLocaleString();
+  };
+
+  return (
+    <>
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 999,
+        }}
+        onClick={onClose}
+      />
+      <div style={menuStyle}>
+        <div
+          style={menuItemStyle}
+          onClick={handleNew}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = '#313244';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = 'transparent';
+          }}
+        >
+          <span>New Project</span>
+        </div>
+
+        <div style={dividerStyle} />
+
+        <div
+          style={features.length === 0 ? disabledItemStyle : menuItemStyle}
+          onClick={features.length > 0 ? handleSave : undefined}
+          onMouseEnter={(e) => {
+            if (features.length > 0) {
+              e.currentTarget.style.backgroundColor = '#313244';
+            }
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = 'transparent';
+          }}
+        >
+          <span>Save Project</span>
+        </div>
+
+        <div
+          style={!hasSavedProject() ? disabledItemStyle : menuItemStyle}
+          onClick={hasSavedProject() ? handleLoad : undefined}
+          onMouseEnter={(e) => {
+            if (hasSavedProject()) {
+              e.currentTarget.style.backgroundColor = '#313244';
+            }
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = 'transparent';
+          }}
+        >
+          <span>Load Project</span>
+        </div>
+
+        {savedInfo && (
+          <div
+            style={{
+              padding: '8px 16px',
+              fontSize: '10px',
+              color: '#6c7086',
+              borderTop: '1px solid #313244',
+              marginTop: '4px',
+            }}
+          >
+            <div>Last saved: {formatDate(savedInfo.savedAt)}</div>
+            <div>{savedInfo.featureCount} feature{savedInfo.featureCount !== 1 ? 's' : ''}</div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+};
+
 // ============ FEATURE ICON COMPONENT ============
 
 interface FeatureIconProps {
@@ -387,6 +557,20 @@ export const FeatureTree: React.FC = () => {
   // Edit dialog state
   const [editingFeature, setEditingFeature] = useState<ExtrusionFeature | CutFeature | null>(null);
 
+  // Project menu state
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [projectMenuPosition, setProjectMenuPosition] = useState<{ left: number; top: number } | null>(null);
+
+  const handleProjectMenuClick = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
+    if (projectMenuOpen) {
+      setProjectMenuOpen(false);
+    } else {
+      const rect = e.currentTarget.getBoundingClientRect();
+      setProjectMenuPosition({ left: rect.left, top: rect.bottom + 4 });
+      setProjectMenuOpen(true);
+    }
+  }, [projectMenuOpen]);
+
   const handleDoubleClick = useCallback(
     (feature: Feature) => {
       if (feature.type === 'sketch') {
@@ -486,15 +670,27 @@ export const FeatureTree: React.FC = () => {
           borderBottom: '1px solid #313244',
         }}
       >
-        <span
-          style={{
-            fontSize: '13px',
-            fontWeight: 600,
-            color: '#cdd6f4',
-          }}
-        >
-          Features
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button
+            onClick={handleProjectMenuClick}
+            style={{
+              ...historyButtonStyle(false),
+              padding: '4px 6px',
+            }}
+            title="Project menu"
+          >
+            ☰
+          </button>
+          <span
+            style={{
+              fontSize: '13px',
+              fontWeight: 600,
+              color: '#cdd6f4',
+            }}
+          >
+            Features
+          </span>
+        </div>
         <div style={{ display: 'flex', gap: '4px' }}>
           <button
             onClick={undo}
@@ -514,6 +710,13 @@ export const FeatureTree: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Project menu */}
+      <ProjectMenu
+        isOpen={projectMenuOpen}
+        onClose={() => setProjectMenuOpen(false)}
+        anchorPosition={projectMenuPosition}
+      />
 
       {/* Feature list */}
       <div

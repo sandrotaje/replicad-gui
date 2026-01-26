@@ -10,6 +10,79 @@ import type {
   SketchElement,
   ShapeData,
 } from '../types';
+import { useStore as useLegacyStore } from './useStore';
+
+/**
+ * Clear the legacy store's 3D data (shapeData, meshData)
+ * Called when project is cleared or loaded to ensure 3D view updates
+ */
+function clearLegacy3DData() {
+  const legacyState = useLegacyStore.getState();
+  legacyState.setShapeData(null);
+  legacyState.setMeshData(null);
+}
+
+// ============ LOCAL STORAGE PERSISTENCE ============
+
+const STORAGE_KEY = 'replicad-cad-project';
+
+interface SavedProjectData {
+  version: number;
+  savedAt: number;
+  features: Feature[];
+}
+
+/**
+ * Serialize features to JSON for localStorage
+ */
+function serializeProject(features: Feature[]): string {
+  const data: SavedProjectData = {
+    version: 1,
+    savedAt: Date.now(),
+    features,
+  };
+  return JSON.stringify(data);
+}
+
+/**
+ * Deserialize features from localStorage JSON
+ */
+function deserializeProject(json: string): SavedProjectData | null {
+  try {
+    const data = JSON.parse(json) as SavedProjectData;
+    if (!data.version || !Array.isArray(data.features)) {
+      console.warn('Invalid project data format');
+      return null;
+    }
+    return data;
+  } catch (e) {
+    console.error('Failed to parse project data:', e);
+    return null;
+  }
+}
+
+/**
+ * Rebuild derived state (featureById, dependents) from features array
+ */
+function rebuildDerivedState(features: Feature[]) {
+  const featureById = new Map<string, Feature>();
+  const dependents = new Map<string, Set<string>>();
+
+  for (const feature of features) {
+    featureById.set(feature.id, feature);
+
+    // Build dependents map
+    const deps = getFeatureDependencies(feature);
+    for (const depId of deps) {
+      if (!dependents.has(depId)) {
+        dependents.set(depId, new Set());
+      }
+      dependents.get(depId)!.add(feature.id);
+    }
+  }
+
+  return { featureById, dependents };
+}
 
 // ============ ACTION INTERFACE ============
 
@@ -54,6 +127,13 @@ interface FeatureStoreActions {
   setFinalShape: (shape: ShapeData | null) => void;
   setGeometryCache: (featureId: string, geometry: unknown) => void;
   clearGeometryCache: () => void;
+
+  // Persistence
+  saveToLocalStorage: () => boolean;
+  loadFromLocalStorage: () => boolean;
+  clearProject: () => void;
+  hasSavedProject: () => boolean;
+  getSavedProjectInfo: () => { savedAt: number; featureCount: number } | null;
 }
 
 // ============ HELPER FUNCTIONS ============
@@ -1010,6 +1090,105 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
 
   clearGeometryCache: () => {
     set({ geometryCache: new Map() });
+  },
+
+  // ============ PERSISTENCE ============
+
+  saveToLocalStorage: () => {
+    try {
+      const state = get();
+      const json = serializeProject(state.features);
+      localStorage.setItem(STORAGE_KEY, json);
+      console.log('[Feature Store] Project saved to localStorage');
+      return true;
+    } catch (e) {
+      console.error('[Feature Store] Failed to save project:', e);
+      return false;
+    }
+  },
+
+  loadFromLocalStorage: () => {
+    try {
+      const json = localStorage.getItem(STORAGE_KEY);
+      if (!json) {
+        console.log('[Feature Store] No saved project found');
+        return false;
+      }
+
+      const data = deserializeProject(json);
+      if (!data) {
+        return false;
+      }
+
+      // Clear legacy store's 3D data first (will be re-evaluated from loaded features)
+      clearLegacy3DData();
+
+      // Rebuild derived state from features
+      const { featureById, dependents } = rebuildDerivedState(data.features);
+
+      set({
+        features: data.features,
+        featureById,
+        dependents,
+        activeFeatureId: null,
+        editingSketchId: null,
+        geometryCache: new Map(),
+        finalShape: null,
+        history: {
+          undoStack: [],
+          redoStack: [],
+          maxHistorySize: 50,
+        },
+      });
+
+      console.log(`[Feature Store] Loaded project with ${data.features.length} features`);
+      return true;
+    } catch (e) {
+      console.error('[Feature Store] Failed to load project:', e);
+      return false;
+    }
+  },
+
+  clearProject: () => {
+    // Clear legacy store's 3D data first
+    clearLegacy3DData();
+
+    set({
+      features: [],
+      featureById: new Map(),
+      dependents: new Map(),
+      activeFeatureId: null,
+      editingSketchId: null,
+      geometryCache: new Map(),
+      finalShape: null,
+      history: {
+        undoStack: [],
+        redoStack: [],
+        maxHistorySize: 50,
+      },
+    });
+    console.log('[Feature Store] Project cleared');
+  },
+
+  hasSavedProject: () => {
+    return localStorage.getItem(STORAGE_KEY) !== null;
+  },
+
+  getSavedProjectInfo: () => {
+    try {
+      const json = localStorage.getItem(STORAGE_KEY);
+      if (!json) return null;
+
+      const data = deserializeProject(json);
+      if (!data) return null;
+
+      return {
+        savedAt: data.savedAt,
+        featureCount: data.features.length,
+      };
+    } catch {
+      return null;
+    }
   },
 }));
 
