@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { useStore, planesEqual, getElementCenter, getPlaneKey } from '../store/useStore';
+import { useStore, planesEqual, getElementCenter, getPlaneKey, getPlaneOrientation } from '../store/useStore';
 import type {
   Point,
   SketchElement,
@@ -67,6 +67,8 @@ export function Sketcher() {
   const selectElement = useStore((state) => state.selectElement);
   const deselectAll = useStore((state) => state.deselectAll);
   const sketchPlane = useStore((state) => state.sketchPlane);
+  const shapeData = useStore((state) => state.shapeData);
+  const faceOutline = useStore((state) => state.faceOutline);
   const planeDepths = useStore((state) => state.planeDepths);
   const defaultDepth = useStore((state) => state.defaultDepth);
   const setPlaneDepth = useStore((state) => state.setPlaneDepth);
@@ -78,16 +80,45 @@ export function Sketcher() {
   const currentOperation = planeOperations.get(currentPlaneKey) || 'extrude';
   const currentDepth = planeDepths.get(currentPlaneKey) ?? defaultDepth;
 
+  // Get current plane's orientation
+  const currentOrientation = useMemo(
+    () => getPlaneOrientation(sketchPlane, shapeData),
+    [sketchPlane, shapeData]
+  );
+
   // Filter elements by current plane
   const currentPlaneElements = useMemo(
     () => elements.filter((e) => planesEqual(e.plane, sketchPlane)),
     [elements, sketchPlane]
   );
 
-  // Elements on other planes (shown dimmed)
+  // Elements on parallel planes (same orientation, different plane - shown dimmed)
+  // For standard planes: show elements from same orientation
+  // For face planes: show elements from standard planes with same orientation
   const otherPlaneElements = useMemo(
-    () => elements.filter((e) => !planesEqual(e.plane, sketchPlane)),
-    [elements, sketchPlane]
+    () => elements.filter((e) => {
+      // Skip elements on the exact same plane
+      if (planesEqual(e.plane, sketchPlane)) return false;
+
+      // Get orientations
+      const elemOrientation = getPlaneOrientation(e.plane, shapeData);
+
+      // If current plane is a standard plane, show elements from same orientation
+      if (typeof sketchPlane === 'string') {
+        return elemOrientation === sketchPlane;
+      }
+
+      // If current plane is a face plane, show elements from standard planes
+      // with the same orientation as the face (if we can determine it)
+      if (currentOrientation && elemOrientation === currentOrientation) {
+        return true;
+      }
+
+      // If we can't determine face orientation, don't show other elements
+      // (safer than showing wrong projections)
+      return false;
+    }),
+    [elements, sketchPlane, shapeData, currentOrientation]
   );
 
   // Coordinate transformations
@@ -440,23 +471,114 @@ export function Sketcher() {
       ctx.stroke();
     }
 
+    // Determine axis labels based on current plane
+    let horizontalAxis = 'X';
+    let verticalAxis = 'Y';
+    if (typeof sketchPlane === 'string') {
+      if (sketchPlane === 'XZ') {
+        horizontalAxis = 'X';
+        verticalAxis = 'Z';
+      } else if (sketchPlane === 'YZ') {
+        horizontalAxis = 'Y';
+        verticalAxis = 'Z';
+      }
+    }
+
     // Draw axes
     ctx.strokeStyle = '#585b70';
     ctx.lineWidth = 2;
 
-    // X axis
+    // Horizontal axis
     ctx.beginPath();
     ctx.moveTo(0, origin.y);
     ctx.lineTo(canvas.width, origin.y);
     ctx.stroke();
 
-    // Y axis
+    // Vertical axis
     ctx.beginPath();
     ctx.moveTo(origin.x, 0);
     ctx.lineTo(origin.x, canvas.height);
     ctx.stroke();
 
-    // Draw elements from other planes (dimmed)
+    // Draw axis labels
+    ctx.fillStyle = '#cdd6f4';
+    ctx.font = 'bold 12px monospace';
+
+    // Horizontal axis label (right side)
+    ctx.fillText(horizontalAxis, canvas.width - 20, origin.y - 8);
+
+    // Vertical axis label (top)
+    ctx.fillText(verticalAxis, origin.x + 8, 20);
+
+    // Draw face boundary if we're sketching on a face
+    // This helps users understand where they're sketching relative to the face
+    if (faceOutline && faceOutline.length >= 3) {
+      ctx.save();
+
+      // Draw semi-transparent filled area showing the face
+      ctx.fillStyle = 'rgba(100, 150, 255, 0.1)'; // Light blue transparent
+      ctx.beginPath();
+      const firstPoint = worldToScreen(faceOutline[0].x, faceOutline[0].y);
+      ctx.moveTo(firstPoint.x, firstPoint.y);
+
+      for (let i = 1; i < faceOutline.length; i++) {
+        const point = worldToScreen(faceOutline[i].x, faceOutline[i].y);
+        ctx.lineTo(point.x, point.y);
+      }
+      ctx.closePath();
+      ctx.fill();
+
+      // Draw dashed outline around the face boundary
+      ctx.strokeStyle = 'rgba(100, 150, 255, 0.8)'; // Blue dashed line
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      ctx.moveTo(firstPoint.x, firstPoint.y);
+
+      for (let i = 1; i < faceOutline.length; i++) {
+        const point = worldToScreen(faceOutline[i].x, faceOutline[i].y);
+        ctx.lineTo(point.x, point.y);
+      }
+      ctx.closePath();
+      ctx.stroke();
+
+      // Draw origin marker (cross) at face center
+      // The face outline is shifted so (0,0) is at the corner, so we need to compute the center
+      const minX = Math.min(...faceOutline.map(p => p.x));
+      const maxX = Math.max(...faceOutline.map(p => p.x));
+      const minY = Math.min(...faceOutline.map(p => p.y));
+      const maxY = Math.max(...faceOutline.map(p => p.y));
+      const faceCenterX = (minX + maxX) / 2;
+      const faceCenterY = (minY + maxY) / 2;
+      const originScreen = worldToScreen(faceCenterX, faceCenterY);
+
+      ctx.setLineDash([]);
+      ctx.strokeStyle = 'rgba(255, 100, 100, 0.8)'; // Red for origin cross
+      ctx.lineWidth = 1.5;
+
+      // Draw cross marker
+      const crossSize = 10;
+      ctx.beginPath();
+      ctx.moveTo(originScreen.x - crossSize, originScreen.y);
+      ctx.lineTo(originScreen.x + crossSize, originScreen.y);
+      ctx.moveTo(originScreen.x, originScreen.y - crossSize);
+      ctx.lineTo(originScreen.x, originScreen.y + crossSize);
+      ctx.stroke();
+
+      // Draw small circle at origin
+      ctx.beginPath();
+      ctx.arc(originScreen.x, originScreen.y, 3, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Label
+      ctx.fillStyle = 'rgba(100, 150, 255, 0.9)';
+      ctx.font = '10px monospace';
+      ctx.fillText('Face boundary', firstPoint.x + 4, firstPoint.y - 8);
+
+      ctx.restore();
+    }
+
+    // Draw elements from other planes with same orientation (dimmed)
     otherPlaneElements.forEach((elem) => drawElement(ctx, elem, true));
 
     // Draw elements on current plane
@@ -674,6 +796,7 @@ export function Sketcher() {
   }, [
     currentPlaneElements,
     otherPlaneElements,
+    faceOutline,
     isDrawing,
     startPoint,
     currentPoint,
@@ -682,6 +805,7 @@ export function Sketcher() {
     scale,
     currentTool,
     drawElement,
+    sketchPlane,
   ]);
 
   // Canvas resize

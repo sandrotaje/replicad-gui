@@ -8,6 +8,9 @@ export type StandardPlane = 'XY' | 'XZ' | 'YZ';
 export interface FacePlane {
   type: 'face';
   faceIndex: number;
+  // Face dimensions for coordinate transformation
+  faceWidth?: number;
+  faceHeight?: number;
 }
 
 export type SketchPlane = StandardPlane | FacePlane;
@@ -135,6 +138,12 @@ export interface EdgesWithGroups {
   edgeGroups: EdgeGroup[];
 }
 
+export interface Point3D {
+  x: number;
+  y: number;
+  z: number;
+}
+
 export interface IndividualFace {
   faceIndex: number;
   vertices: Float32Array;
@@ -144,8 +153,16 @@ export interface IndividualFace {
   plane?: {
     origin: [number, number, number];
     xDir: [number, number, number];
+    yDir: [number, number, number];
     normal: [number, number, number];
+    // Face bounds in 2D (local coordinate system) for offset calculation
+    // Replicad's sketchOnFace uses UV origin (typically a corner), not center
+    bounds2D?: { minX: number; minY: number; maxX: number; maxY: number };
   };
+  // 3D boundary points from outerWire (in world coordinates)
+  boundary3D?: Point3D[];
+  // 2D boundary points in face local coordinates (for sketch display)
+  boundaryPoints2D?: Point[];
 }
 
 export interface IndividualEdge {
@@ -160,10 +177,7 @@ export interface ShapeData {
   individualEdges: IndividualEdge[];
 }
 
-export type SelectionMode = 'none' | 'face' | 'edge';
-
 export interface SelectionState {
-  mode: SelectionMode;
   selectedFaceIndices: Set<number>;
   selectedEdgeIndices: Set<number>;
   hoveredFaceIndex: number | null;
@@ -176,4 +190,148 @@ export interface WorkerMessage {
   meshData?: MeshData;
   shapeData?: ShapeData;
   error?: string;
+}
+
+// ============ FEATURE TYPES ============
+
+export type FeatureType =
+  | 'sketch'
+  | 'extrusion'
+  | 'cut'
+  | 'chamfer'
+  | 'fillet'
+  | 'revolve';
+
+export interface FeatureBase {
+  id: string;
+  type: FeatureType;
+  name: string;                    // User-friendly name (e.g., "Sketch 1", "Extrude 1")
+  createdAt: number;               // Timestamp for ordering
+  isValid: boolean;                // Did evaluation succeed?
+  errorMessage?: string;           // Error if invalid
+  isDirty: boolean;                // Needs re-evaluation?
+  isCollapsed: boolean;            // UI state for tree view
+}
+
+// Reference to where a sketch is placed
+export interface SketchPlaneReference {
+  type: 'standard';
+  plane: StandardPlane;            // 'XY' | 'XZ' | 'YZ'
+  offset: number;                  // Offset along normal
+}
+
+export interface SketchFaceReference {
+  type: 'face';
+  parentFeatureId: string;         // Which feature's face
+  faceIndex: number;               // Which face on that feature
+  boundaryPoints: Point[];         // 2D boundary for display (cached)
+}
+
+export type SketchReference = SketchPlaneReference | SketchFaceReference;
+
+// Sketch Feature - contains 2D elements
+export interface SketchFeature extends FeatureBase {
+  type: 'sketch';
+  reference: SketchReference;      // Where the sketch lives
+  elements: SketchElement[];       // 2D sketch elements (existing type)
+  isClosed: boolean;               // Is the sketch a closed profile?
+}
+
+// Extrusion Feature - extrudes a sketch
+export interface ExtrusionFeature extends FeatureBase {
+  type: 'extrusion';
+  sketchId: string;                // Which sketch to extrude
+  depth: number;                   // Extrusion depth
+  direction: 'normal' | 'reverse'; // Direction relative to sketch plane
+  operation: 'new' | 'fuse' | 'cut'; // How to combine with existing geometry
+}
+
+// Cut Feature - cuts using a sketch profile
+export interface CutFeature extends FeatureBase {
+  type: 'cut';
+  sketchId: string;                // Which sketch defines the cut profile
+  depth: number | 'through';       // Depth or through-all
+  direction: 'normal' | 'reverse' | 'both';
+}
+
+// Chamfer Feature
+export interface ChamferFeature extends FeatureBase {
+  type: 'chamfer';
+  targetFeatureId: string;         // Which feature to chamfer
+  edgeIndices: number[];           // Which edges
+  distance: number;                // Chamfer distance
+}
+
+// Fillet Feature
+export interface FilletFeature extends FeatureBase {
+  type: 'fillet';
+  targetFeatureId: string;         // Which feature to fillet
+  edgeIndices: number[];           // Which edges
+  radius: number;                  // Fillet radius
+}
+
+// Union of all feature types
+export type Feature =
+  | SketchFeature
+  | ExtrusionFeature
+  | CutFeature
+  | ChamferFeature
+  | FilletFeature;
+
+// ============ HISTORY/COMMAND TYPES ============
+
+export type CommandType =
+  | 'addFeature'
+  | 'deleteFeature'
+  | 'updateFeature'
+  | 'reorderFeature'
+  | 'addSketchElement'
+  | 'updateSketchElement'
+  | 'deleteSketchElement';
+
+export interface Command {
+  id: string;
+  type: CommandType;
+  timestamp: number;
+  // Stores state needed for undo/redo
+  payload: {
+    before: unknown;               // State before command
+    after: unknown;                // State after command
+    featureId?: string;            // Affected feature
+    elementId?: string;            // Affected element (for sketch commands)
+  };
+}
+
+export interface HistoryState {
+  undoStack: Command[];
+  redoStack: Command[];
+  maxHistorySize: number;          // Limit memory usage
+}
+
+// ============ FEATURE STORE STATE ============
+
+export interface FeatureStoreState {
+  // Feature tree (ordered by creation)
+  features: Feature[];
+
+  // Quick lookup
+  featureById: Map<string, Feature>;
+
+  // Dependency graph: featureId -> IDs of features that depend on it
+  dependents: Map<string, Set<string>>;
+
+  // Currently active/editing feature
+  activeFeatureId: string | null;
+
+  // Currently editing sketch (if activeFeature is a sketch)
+  editingSketchId: string | null;
+
+  // Cached evaluation results: featureId -> geometry
+  geometryCache: Map<string, unknown>;
+
+  // The final combined shape after all features
+  finalShape: ShapeData | null;
+
+  // History for undo/redo
+  history: HistoryState;
 }

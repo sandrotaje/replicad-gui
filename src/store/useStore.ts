@@ -4,7 +4,6 @@ import type {
   RectangleElement,
   MeshData,
   ShapeData,
-  SelectionMode,
   SketchPlane,
   FacePlane,
   SketchTool,
@@ -43,8 +42,7 @@ interface AppState {
   isEvaluating: boolean;
   error: string | null;
 
-  // 3D Selection state
-  selectionMode: SelectionMode;
+  // 3D Selection state (always active for both faces and edges)
   selectedFaceIndices: Set<number>;
   selectedEdgeIndices: Set<number>;
   hoveredFaceIndex: number | null;
@@ -59,6 +57,9 @@ interface AppState {
 
   // Sketch plane state (current plane for new elements)
   sketchPlane: SketchPlane;
+
+  // Face outline for current face plane (2D points in sketch coordinates)
+  faceOutline: Point[] | null;
 
   // Sync tracking (to prevent infinite loops)
   lastUpdateSource: UpdateSource;
@@ -91,8 +92,7 @@ interface AppState {
   setPlaneOperation: (planeKey: string, operation: OperationType) => void;
   getCurrentPlaneOperation: () => OperationType;
 
-  // 3D Selection actions
-  setSelectionMode: (mode: SelectionMode) => void;
+  // 3D Selection actions (always active for both faces and edges)
   selectFace: (index: number, multiSelect?: boolean) => void;
   selectEdge: (index: number, multiSelect?: boolean) => void;
   setHoveredFace: (index: number | null) => void;
@@ -165,6 +165,48 @@ function getElementCenter(element: SketchElement): Point {
   }
 }
 
+// Compute convex hull using Graham scan algorithm
+function computeConvexHull(points: Point[]): Point[] {
+  if (points.length < 3) return points;
+
+  // Find the bottom-most point (or left-most in case of tie)
+  let start = 0;
+  for (let i = 1; i < points.length; i++) {
+    if (points[i].y < points[start].y ||
+        (points[i].y === points[start].y && points[i].x < points[start].x)) {
+      start = i;
+    }
+  }
+
+  const pivot = points[start];
+
+  // Sort points by polar angle with respect to pivot
+  const sorted = points
+    .filter((_, i) => i !== start)
+    .map((p) => ({
+      point: p,
+      angle: Math.atan2(p.y - pivot.y, p.x - pivot.x),
+      dist: (p.x - pivot.x) ** 2 + (p.y - pivot.y) ** 2,
+    }))
+    .sort((a, b) => a.angle - b.angle || a.dist - b.dist)
+    .map((item) => item.point);
+
+  // Cross product to determine turn direction
+  const cross = (o: Point, a: Point, b: Point): number =>
+    (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+
+  // Build hull
+  const hull: Point[] = [pivot];
+  for (const p of sorted) {
+    while (hull.length > 1 && cross(hull[hull.length - 2], hull[hull.length - 1], p) <= 0) {
+      hull.pop();
+    }
+    hull.push(p);
+  }
+
+  return hull;
+}
+
 // Helper to move an element by a delta
 function moveElementByDelta(element: SketchElement, delta: Point): SketchElement {
   switch (element.type) {
@@ -224,11 +266,18 @@ function generateElementCode(
   // Helper to wrap drawing code with sketch method
   // For standard planes: drawX(...).sketchOnPlane("XY")
   // For face planes: sketchOnFace(drawX(...), result, faceIndex, offsetX, offsetY)
+  // offsetX/Y are the element's position in sketch space (origin at corner, Y up)
+  // Replicad's sketchOnFace uses center-based coordinates (origin at face center)
   const wrapWithSketch = (drawingCode: string, offsetX: number = 0, offsetY: number = 0): string => {
     if (isStandardPlane) {
       return `${drawingCode}.sketchOnPlane("${standardPlane}")`;
     } else {
-      return `sketchOnFace(${drawingCode}, result, ${facePlane!.faceIndex}, ${offsetX.toFixed(2)}, ${offsetY.toFixed(2)})`;
+      // Convert from corner-based (sketch) to center-based (Replicad) coordinates
+      const faceWidth = facePlane!.faceWidth ?? 0;
+      const faceHeight = facePlane!.faceHeight ?? 0;
+      const centeredX = offsetX - faceWidth / 2;
+      const centeredY = offsetY - faceHeight / 2;
+      return `sketchOnFace(${drawingCode}, result, ${facePlane!.faceIndex}, ${centeredX.toFixed(2)}, ${centeredY.toFixed(2)})`;
     }
   };
 
@@ -387,8 +436,7 @@ function main() {
   isEvaluating: false,
   error: null,
 
-  // 3D Selection state
-  selectionMode: 'none',
+  // 3D Selection state (always active)
   selectedFaceIndices: new Set(),
   selectedEdgeIndices: new Set(),
   hoveredFaceIndex: null,
@@ -398,6 +446,7 @@ function main() {
   defaultDepth: 10,
   planeOperations: new Map<string, OperationType>(),
   sketchPlane: 'XY' as SketchPlane,
+  faceOutline: null,
   lastUpdateSource: null,
 
   // Legacy compatibility - derived from elements
@@ -531,16 +580,70 @@ function main() {
   },
 
   setMeshData: (meshData) => set({ meshData }),
-  setShapeData: (shapeData) =>
+  setShapeData: (shapeData) => {
+    const state = get();
+
+    // Recompute face outline if we're on a face plane
+    let faceOutline: Point[] | null = null;
+    if (typeof state.sketchPlane !== 'string' && shapeData) {
+      const faceIndex = state.sketchPlane.faceIndex;
+      const face = shapeData.individualFaces.find((f) => f.faceIndex === faceIndex);
+
+      if (face?.isPlanar && face.plane) {
+        const { origin, xDir, normal } = face.plane;
+
+        // Compute yDir = normal × xDir (to match Replicad's face coordinate system)
+        const yDir: [number, number, number] = [
+          normal[1] * xDir[2] - normal[2] * xDir[1],
+          normal[2] * xDir[0] - normal[0] * xDir[2],
+          normal[0] * xDir[1] - normal[1] * xDir[0],
+        ];
+
+        // Project all vertices to 2D
+        const points2D: Point[] = [];
+        const seen = new Set<string>();
+
+        for (let i = 0; i < face.vertices.length; i += 3) {
+          const vx = face.vertices[i] - origin[0];
+          const vy = face.vertices[i + 1] - origin[1];
+          const vz = face.vertices[i + 2] - origin[2];
+
+          const localX = vx * xDir[0] + vy * xDir[1] + vz * xDir[2];
+          const localY = vx * yDir[0] + vy * yDir[1] + vz * yDir[2];
+
+          const key = `${localX.toFixed(4)},${localY.toFixed(4)}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            points2D.push({ x: localX, y: localY });
+          }
+        }
+
+        if (points2D.length >= 3) {
+          const hull = computeConvexHull(points2D);
+
+          // Shift the outline so that (0,0) is at the corner
+          const minX = Math.min(...hull.map(p => p.x));
+          const minY = Math.min(...hull.map(p => p.y));
+
+          faceOutline = hull.map(p => ({
+            x: p.x - minX,
+            y: p.y - minY,
+          }));
+        }
+      }
+    }
+
     set({
       shapeData,
       meshData: shapeData?.mesh ?? null,
+      faceOutline,
       // Clear selection when shape changes
       selectedFaceIndices: new Set(),
       selectedEdgeIndices: new Set(),
       hoveredFaceIndex: null,
       hoveredEdgeIndex: null,
-    }),
+    });
+  },
   setIsEvaluating: (isEvaluating) => set({ isEvaluating }),
   setError: (error) => set({ error }),
 
@@ -575,7 +678,8 @@ function main() {
   // Sketch plane actions
   setSketchPlane: (plane) => {
     // Just change the active plane for new elements, don't regenerate code
-    set({ sketchPlane: plane });
+    // Clear face outline when switching to standard plane
+    set({ sketchPlane: plane, faceOutline: null });
   },
 
   sketchOnFace: (faceIndex) => {
@@ -586,16 +690,110 @@ function main() {
       return;
     }
 
+    // Compute face outline in 2D coordinates
+    let faceOutline: Point[] | null = null;
+    let faceWidth = 0;
+    let faceHeight = 0;
+
+    if (face.plane) {
+      const { bounds2D } = face.plane;
+
+      // Use actual boundary points from outerWire if available
+      if (face.boundaryPoints2D && face.boundaryPoints2D.length >= 3) {
+        faceOutline = [...face.boundaryPoints2D];
+
+        // Get bounds from the boundary points
+        const minX = Math.min(...faceOutline.map(p => p.x));
+        const maxX = Math.max(...faceOutline.map(p => p.x));
+        const minY = Math.min(...faceOutline.map(p => p.y));
+        const maxY = Math.max(...faceOutline.map(p => p.y));
+
+        faceWidth = maxX - minX;
+        faceHeight = maxY - minY;
+
+        console.log('[Store] Using actual boundary points from outerWire:', faceOutline.length, 'points');
+      } else if (bounds2D) {
+        // Fallback: use bounds2D to create a rectangular outline
+        faceWidth = bounds2D.maxX - bounds2D.minX;
+        faceHeight = bounds2D.maxY - bounds2D.minY;
+
+        // Create rectangular outline from bounds (already shifted to 0,0 corner)
+        faceOutline = [
+          { x: 0, y: 0 },
+          { x: faceWidth, y: 0 },
+          { x: faceWidth, y: faceHeight },
+          { x: 0, y: faceHeight },
+        ];
+
+        console.log('[Store] Using bounds2D for rectangular outline');
+      } else {
+        // Last resort fallback: compute from mesh vertices with convex hull
+        const { origin, xDir, normal } = face.plane;
+
+        // Compute yDir = normal × xDir (to match Replicad's face coordinate system)
+        const yDir: [number, number, number] = [
+          normal[1] * xDir[2] - normal[2] * xDir[1],
+          normal[2] * xDir[0] - normal[0] * xDir[2],
+          normal[0] * xDir[1] - normal[1] * xDir[0],
+        ];
+
+        // Project all vertices to 2D and find unique points
+        const points2D: Point[] = [];
+        const seen = new Set<string>();
+
+        for (let i = 0; i < face.vertices.length; i += 3) {
+          const vx = face.vertices[i] - origin[0];
+          const vy = face.vertices[i + 1] - origin[1];
+          const vz = face.vertices[i + 2] - origin[2];
+
+          // Project onto face coordinate system
+          const localX = vx * xDir[0] + vy * xDir[1] + vz * xDir[2];
+          const localY = vx * yDir[0] + vy * yDir[1] + vz * yDir[2];
+
+          // Round to avoid floating point duplicates
+          const key = `${localX.toFixed(4)},${localY.toFixed(4)}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            points2D.push({ x: localX, y: localY });
+          }
+        }
+
+        // Compute convex hull to get the outline
+        if (points2D.length >= 3) {
+          const hull = computeConvexHull(points2D);
+
+          // Get bounds
+          const minX = Math.min(...hull.map(p => p.x));
+          const maxX = Math.max(...hull.map(p => p.x));
+          const minY = Math.min(...hull.map(p => p.y));
+          const maxY = Math.max(...hull.map(p => p.y));
+
+          faceWidth = maxX - minX;
+          faceHeight = maxY - minY;
+
+          // Shift the outline so that (0,0) is at the corner
+          faceOutline = hull.map(p => ({
+            x: p.x - minX,
+            y: p.y - minY,
+          }));
+
+          console.log('[Store] Fallback: using convex hull from mesh vertices');
+        }
+      }
+    }
+
     const facePlane: FacePlane = {
       type: 'face',
       faceIndex,
+      faceWidth,
+      faceHeight,
     };
 
-    // Just set the new plane as active - existing elements keep their planes
+    // Set the new plane as active with the computed outline
     set({
       sketchPlane: facePlane,
+      faceOutline,
       // Clear 3D selection
-      selectionMode: 'none',
       selectedFaceIndices: new Set(),
       selectedEdgeIndices: new Set(),
     });
@@ -631,20 +829,9 @@ function main() {
     return state.planeOperations.get(planeKey) || 'extrude';
   },
 
-  // 3D Selection actions
-  setSelectionMode: (mode) =>
-    set({
-      selectionMode: mode,
-      // Clear selection when mode changes
-      selectedFaceIndices: new Set(),
-      selectedEdgeIndices: new Set(),
-      hoveredFaceIndex: null,
-      hoveredEdgeIndex: null,
-    }),
-
+  // 3D Selection actions (always active for both faces and edges)
   selectFace: (index, multiSelect = false) =>
     set((state) => {
-      if (state.selectionMode !== 'face') return state;
       const newSelectedFaces = multiSelect
         ? new Set(state.selectedFaceIndices)
         : new Set<number>();
@@ -660,7 +847,6 @@ function main() {
 
   selectEdge: (index, multiSelect = false) =>
     set((state) => {
-      if (state.selectionMode !== 'edge') return state;
       const newSelectedEdges = multiSelect
         ? new Set(state.selectedEdgeIndices)
         : new Set<number>();
@@ -731,5 +917,40 @@ function main() {
   },
 }));
 
+// Helper to get the orientation of a plane (which standard plane it's parallel to)
+// Returns 'XY', 'XZ', 'YZ', or null if unknown
+function getPlaneOrientation(
+  plane: SketchPlane,
+  shapeData: ShapeData | null
+): 'XY' | 'XZ' | 'YZ' | null {
+  if (typeof plane === 'string') {
+    return plane;
+  }
+
+  // For face planes, look up the face normal
+  if (shapeData) {
+    const face = shapeData.individualFaces.find((f) => f.faceIndex === plane.faceIndex);
+    if (face?.plane?.normal) {
+      const [nx, ny, nz] = face.plane.normal;
+      const absX = Math.abs(nx);
+      const absY = Math.abs(ny);
+      const absZ = Math.abs(nz);
+
+      // Determine which axis the normal is most aligned with
+      // Normal along Z means XY plane, etc.
+      const threshold = 0.9; // Tolerance for "aligned"
+      if (absZ > threshold && absX < 0.1 && absY < 0.1) {
+        return 'XY'; // Normal along Z
+      } else if (absY > threshold && absX < 0.1 && absZ < 0.1) {
+        return 'XZ'; // Normal along Y
+      } else if (absX > threshold && absY < 0.1 && absZ < 0.1) {
+        return 'YZ'; // Normal along X
+      }
+    }
+  }
+
+  return null; // Unknown orientation (non-axis-aligned face)
+}
+
 // Export helpers for use elsewhere
-export { planesEqual, getPlaneKey, getElementCenter };
+export { planesEqual, getPlaneKey, getElementCenter, getPlaneOrientation };

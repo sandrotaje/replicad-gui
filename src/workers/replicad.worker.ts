@@ -47,9 +47,10 @@ function evaluateCode(code: string) {
       if (!face) {
         throw new Error('Face not found at index ' + faceIndex);
       }
-      // Translate the 2D drawing by the offset before sketching on the face
+      // Translate the 2D drawing by the offset, then sketch on the face
+      // Using no mode parameter (defaults to "bounds" behavior which properly places the sketch on the face)
       const translatedDrawing = drawing.translate(offsetX, offsetY);
-      return translatedDrawing.sketchOnFace(face, "original");
+      return translatedDrawing.sketchOnFace(face);
     }
 
     ${code}
@@ -75,6 +76,96 @@ interface EdgeGroup {
   start: number;
   count: number;
   edgeId: number;
+}
+
+// ============ Vector Math Helpers ============
+
+interface Point3D {
+  x: number;
+  y: number;
+  z: number;
+}
+
+interface Point2D {
+  x: number;
+  y: number;
+}
+
+/**
+ * Compute the dot product of two 3D vectors
+ */
+function dot(a: Point3D, b: Point3D): number {
+  return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+/**
+ * Compute the cross product of two 3D vectors
+ */
+function cross(a: Point3D, b: Point3D): Point3D {
+  return {
+    x: a.y * b.z - a.z * b.y,
+    y: a.z * b.x - a.x * b.z,
+    z: a.x * b.y - a.y * b.x,
+  };
+}
+
+/**
+ * Normalize a 3D vector to unit length
+ */
+function normalize(v: Point3D): Point3D {
+  const len = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+  if (len < 0.0001) {
+    return { x: 0, y: 0, z: 1 }; // Default to Z axis if zero vector
+  }
+  return {
+    x: v.x / len,
+    y: v.y / len,
+    z: v.z / len,
+  };
+}
+
+/**
+ * Compute consistent xAxis and yAxis perpendicular to a given normal.
+ * This creates a right-handed coordinate system on the face.
+ */
+function computeFaceAxes(normal: Point3D): { xAxis: Point3D; yAxis: Point3D } {
+  // Use a reference vector to compute xAxis perpendicular to normal
+  // Choose reference based on which axis normal is closest to
+  const refVector: Point3D = Math.abs(normal.z) < 0.9
+    ? { x: 0, y: 0, z: 1 }
+    : { x: 1, y: 0, z: 0 };
+
+  // xAxis = normalize(refVector × normal)
+  const xAxis = normalize(cross(refVector, normal));
+
+  // yAxis = normalize(normal × xAxis) - right-handed system
+  const yAxis = normalize(cross(normal, xAxis));
+
+  return { xAxis, yAxis };
+}
+
+/**
+ * Project a 3D point to 2D face-local coordinates.
+ * The 2D coordinates are relative to the face origin using xAxis and yAxis.
+ */
+function projectToFaceCoords(
+  point: Point3D,
+  origin: Point3D,
+  xAxis: Point3D,
+  yAxis: Point3D
+): Point2D {
+  // Compute relative position from origin
+  const relative: Point3D = {
+    x: point.x - origin.x,
+    y: point.y - origin.y,
+    z: point.z - origin.z,
+  };
+
+  // Project onto xAxis and yAxis
+  return {
+    x: dot(relative, xAxis),
+    y: dot(relative, yAxis),
+  };
 }
 
 interface ReplicadMesh {
@@ -167,8 +258,12 @@ function extractShapeData(shape: unknown) {
     plane?: {
       origin: [number, number, number];
       xDir: [number, number, number];
+      yDir: [number, number, number];
       normal: [number, number, number];
+      bounds2D?: { minX: number; minY: number; maxX: number; maxY: number };
     };
+    boundary3D?: Point3D[];
+    boundaryPoints2D?: Point2D[];
   }> = [];
 
   // Always mesh individual faces for selection support
@@ -185,6 +280,13 @@ function extractShapeData(shape: unknown) {
       normalAt?: (point?: { x: number; y: number; z: number }) => { x: number; y: number; z: number };
       UVBox?: [number, number, number, number];
       pointOnSurface?: (u: number, v: number) => { x: number; y: number; z: number };
+      outerWire?: () => {
+        edges: Array<{
+          meshEdges?: (options?: { tolerance?: number }) => { lines: number[] };
+          startPoint?: { x: number; y: number; z: number };
+          endPoint?: { x: number; y: number; z: number };
+        }>;
+      };
     }>;
 
     faces.forEach((face, index) => {
@@ -198,9 +300,17 @@ function extractShapeData(shape: unknown) {
             triangles: faceMesh.triangles?.length,
           });
 
-          // Check if the face is planar and extract plane info
+          // Initialize face data
           let isPlanar = false;
-          let plane: { origin: [number, number, number]; xDir: [number, number, number]; normal: [number, number, number] } | undefined;
+          let plane: {
+            origin: [number, number, number];
+            xDir: [number, number, number];
+            yDir: [number, number, number];
+            normal: [number, number, number];
+            bounds2D?: { minX: number; minY: number; maxX: number; maxY: number };
+          } | undefined;
+          let boundary3D: Point3D[] | undefined;
+          let boundaryPoints2D: Point2D[] | undefined;
 
           try {
             // Check geometry type - "PLANE" indicates a planar face
@@ -212,45 +322,180 @@ function extractShapeData(shape: unknown) {
 
               const center = face.center;
               if (center) {
-                // Get the normal at the center
-                let normal: [number, number, number] = [0, 0, 1];
+                // Get the normal at the center point
+                let normalVec: Point3D = { x: 0, y: 0, z: 1 };
                 if (typeof face.normalAt === 'function') {
-                  const normalVec = face.normalAt(center);
-                  normal = [normalVec.x, normalVec.y, normalVec.z];
+                  const n = face.normalAt(center);
+                  normalVec = { x: n.x, y: n.y, z: n.z };
                 }
 
-                // Calculate origin as world origin (0,0,0) projected onto the plane
-                // This makes sketch coordinates match world XY coordinates better
-                // For plane N·(X-P)=0, projecting origin: origin_proj = N * (N·P)
-                const ndotp = normal[0] * center.x + normal[1] * center.y + normal[2] * center.z;
-                const origin: [number, number, number] = [
-                  normal[0] * ndotp,
-                  normal[1] * ndotp,
-                  normal[2] * ndotp,
-                ];
+                // Compute face coordinate axes using helper function
+                const { xAxis, yAxis } = computeFaceAxes(normalVec);
 
-                // Calculate xDir (perpendicular to normal)
-                // Use a reference vector to compute xDir
-                let refVec: [number, number, number] = [1, 0, 0];
-                // If normal is parallel to X axis, use Y as reference
-                if (Math.abs(normal[0]) > 0.9) {
-                  refVec = [0, 1, 0];
+                // Use face center as the origin
+                const origin: Point3D = { x: center.x, y: center.y, z: center.z };
+
+                // Compute 2D bounds by projecting face mesh vertices
+                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                const vertices = faceMesh.vertices;
+                for (let vi = 0; vi < vertices.length; vi += 3) {
+                  const vertex: Point3D = {
+                    x: vertices[vi],
+                    y: vertices[vi + 1],
+                    z: vertices[vi + 2]
+                  };
+                  const local = projectToFaceCoords(vertex, origin, xAxis, yAxis);
+                  minX = Math.min(minX, local.x);
+                  minY = Math.min(minY, local.y);
+                  maxX = Math.max(maxX, local.x);
+                  maxY = Math.max(maxY, local.y);
                 }
+                const bounds2D = { minX, minY, maxX, maxY };
 
-                // xDir = normalize(refVec - (refVec . normal) * normal)
-                const dot = refVec[0] * normal[0] + refVec[1] * normal[1] + refVec[2] * normal[2];
-                let xDir: [number, number, number] = [
-                  refVec[0] - dot * normal[0],
-                  refVec[1] - dot * normal[1],
-                  refVec[2] - dot * normal[2],
-                ];
-                const len = Math.sqrt(xDir[0] ** 2 + xDir[1] ** 2 + xDir[2] ** 2);
-                if (len > 0.0001) {
-                  xDir = [xDir[0] / len, xDir[1] / len, xDir[2] / len];
+                // Store plane data with all axis information
+                plane = {
+                  origin: [origin.x, origin.y, origin.z],
+                  xDir: [xAxis.x, xAxis.y, xAxis.z],
+                  yDir: [yAxis.x, yAxis.y, yAxis.z],
+                  normal: [normalVec.x, normalVec.y, normalVec.z],
+                  bounds2D
+                };
+
+                console.log('[Worker] Face', index, 'PLANE DATA:', {
+                  'face.center (3D)': center,
+                  'origin': origin,
+                  'normal': normalVec,
+                  'xAxis': xAxis,
+                  'yAxis': yAxis,
+                  'bounds2D': bounds2D,
+                  'face dimensions': {
+                    width: maxX - minX,
+                    height: maxY - minY
+                  }
+                });
+
+                // Extract actual face boundary from outerWire
+                if (typeof face.outerWire === 'function') {
+                  try {
+                    const wire = face.outerWire();
+                    if (wire && Array.isArray(wire.edges)) {
+                      // Collect all 3D boundary points from wire edges
+                      const rawBoundary3D: Point3D[] = [];
+
+                      for (const edge of wire.edges) {
+                        if (edge && typeof edge.meshEdges === 'function') {
+                          // Use meshEdges for accurate edge tessellation
+                          const edgeMesh = edge.meshEdges({ tolerance: 0.05 });
+                          if (edgeMesh.lines && edgeMesh.lines.length > 0) {
+                            // meshEdges returns pairs of points (line segments)
+                            for (let ei = 0; ei < edgeMesh.lines.length; ei += 3) {
+                              rawBoundary3D.push({
+                                x: edgeMesh.lines[ei],
+                                y: edgeMesh.lines[ei + 1],
+                                z: edgeMesh.lines[ei + 2]
+                              });
+                            }
+                          }
+                        } else if (edge?.startPoint && edge?.endPoint) {
+                          // Fallback: use edge start/end points directly
+                          rawBoundary3D.push({
+                            x: edge.startPoint.x,
+                            y: edge.startPoint.y,
+                            z: edge.startPoint.z
+                          });
+                          rawBoundary3D.push({
+                            x: edge.endPoint.x,
+                            y: edge.endPoint.y,
+                            z: edge.endPoint.z
+                          });
+                        }
+                      }
+
+                      if (rawBoundary3D.length > 0) {
+                        // Remove duplicate 3D points
+                        const seen3D = new Set<string>();
+                        boundary3D = [];
+                        for (const pt of rawBoundary3D) {
+                          const key = `${pt.x.toFixed(6)},${pt.y.toFixed(6)},${pt.z.toFixed(6)}`;
+                          if (!seen3D.has(key)) {
+                            seen3D.add(key);
+                            boundary3D.push(pt);
+                          }
+                        }
+
+                        // Project 3D boundary to 2D using face coordinate system
+                        const seen2D = new Set<string>();
+                        boundaryPoints2D = [];
+                        const faceHeight = maxY - minY;
+
+                        for (const pt of boundary3D) {
+                          // Project to face-local coordinates
+                          const local = projectToFaceCoords(pt, origin, xAxis, yAxis);
+
+                          // Shift so (0,0) is at the corner (using bounds)
+                          const shiftedX = local.x - minX;
+                          // Flip Y to match sketch display (Y up) vs Replicad's coordinate system
+                          const shiftedY = faceHeight - (local.y - minY);
+
+                          const key = `${shiftedX.toFixed(4)},${shiftedY.toFixed(4)}`;
+                          if (!seen2D.has(key)) {
+                            seen2D.add(key);
+                            boundaryPoints2D.push({ x: shiftedX, y: shiftedY });
+                          }
+                        }
+
+                        console.log('[Worker] Face', index, 'extracted boundary:', {
+                          '3D points': boundary3D.length,
+                          '2D points': boundaryPoints2D.length
+                        });
+                      }
+                    }
+                  } catch (wireError) {
+                    console.warn('[Worker] Failed to extract outerWire for face', index, wireError);
+                  }
                 }
+              }
+            } else {
+              // Non-planar face - try to extract boundary anyway for visualization
+              // This provides an approximation of the face outline
+              if (typeof face.outerWire === 'function') {
+                try {
+                  const wire = face.outerWire();
+                  if (wire && Array.isArray(wire.edges) && wire.edges.length > 0) {
+                    const rawBoundary3D: Point3D[] = [];
 
-                plane = { origin, xDir, normal };
-                console.log('[Worker] Face', index, 'plane info:', plane);
+                    for (const edge of wire.edges) {
+                      if (edge && typeof edge.meshEdges === 'function') {
+                        const edgeMesh = edge.meshEdges({ tolerance: 0.05 });
+                        if (edgeMesh.lines && edgeMesh.lines.length > 0) {
+                          for (let ei = 0; ei < edgeMesh.lines.length; ei += 3) {
+                            rawBoundary3D.push({
+                              x: edgeMesh.lines[ei],
+                              y: edgeMesh.lines[ei + 1],
+                              z: edgeMesh.lines[ei + 2]
+                            });
+                          }
+                        }
+                      }
+                    }
+
+                    if (rawBoundary3D.length > 0) {
+                      // Store 3D boundary even for non-planar faces
+                      const seen3D = new Set<string>();
+                      boundary3D = [];
+                      for (const pt of rawBoundary3D) {
+                        const key = `${pt.x.toFixed(6)},${pt.y.toFixed(6)},${pt.z.toFixed(6)}`;
+                        if (!seen3D.has(key)) {
+                          seen3D.add(key);
+                          boundary3D.push(pt);
+                        }
+                      }
+                      console.log('[Worker] Face', index, '(non-planar) extracted', boundary3D.length, '3D boundary points');
+                    }
+                  }
+                } catch (wireError) {
+                  console.warn('[Worker] Failed to extract outerWire for non-planar face', index, wireError);
+                }
               }
             }
           } catch (planeError) {
@@ -264,6 +509,8 @@ function extractShapeData(shape: unknown) {
             triangles: new Uint32Array(faceMesh.triangles),
             isPlanar,
             plane,
+            boundary3D,
+            boundaryPoints2D,
           });
         }
       } catch (e) {

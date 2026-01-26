@@ -68,18 +68,15 @@ function SelectableFace({
   );
 }
 
-// Use individual face meshes for selection
+// Use individual face meshes for selection (always active)
 function IndividualFaceMeshes() {
   const shapeData = useStore((state) => state.shapeData);
-  const selectionMode = useStore((state) => state.selectionMode);
   const selectedFaceIndices = useStore((state) => state.selectedFaceIndices);
   const hoveredFaceIndex = useStore((state) => state.hoveredFaceIndex);
   const selectFace = useStore((state) => state.selectFace);
   const setHoveredFace = useStore((state) => state.setHoveredFace);
 
   if (!shapeData || shapeData.individualFaces.length === 0) return null;
-
-  const isSelectionEnabled = selectionMode === 'face';
 
   return (
     <group>
@@ -90,17 +87,14 @@ function IndividualFaceMeshes() {
           isSelected={selectedFaceIndices.has(face.faceIndex)}
           isHovered={hoveredFaceIndex === face.faceIndex}
           onSelect={(e) => {
-            if (!isSelectionEnabled) return;
             e.stopPropagation();
             selectFace(face.faceIndex, e.nativeEvent.shiftKey);
           }}
           onHover={(e) => {
-            if (!isSelectionEnabled) return;
             e.stopPropagation();
             setHoveredFace(face.faceIndex);
           }}
           onUnhover={() => {
-            if (!isSelectionEnabled) return;
             setHoveredFace(null);
           }}
         />
@@ -109,10 +103,9 @@ function IndividualFaceMeshes() {
   );
 }
 
-// Group-based mesh for when faceGroups are available
+// Group-based mesh for when faceGroups are available (always selectable)
 function GroupBasedMesh() {
   const shapeData = useStore((state) => state.shapeData);
-  const selectionMode = useStore((state) => state.selectionMode);
   const selectedFaceIndices = useStore((state) => state.selectedFaceIndices);
   const hoveredFaceIndex = useStore((state) => state.hoveredFaceIndex);
   const selectFace = useStore((state) => state.selectFace);
@@ -161,7 +154,7 @@ function GroupBasedMesh() {
   }, [geometry, faceGroups, selectedFaceIndices, hoveredFaceIndex]);
 
   const handlePointerMove = useCallback((e: ThreeEvent<PointerEvent>) => {
-    if (selectionMode !== 'face' || !faceGroups.length) return;
+    if (!faceGroups.length) return;
     e.stopPropagation();
 
     if (e.faceIndex != null) {
@@ -171,10 +164,10 @@ function GroupBasedMesh() {
         setHoveredFace(faceGroups[groupIndex].faceId);
       }
     }
-  }, [selectionMode, faceGroups, setHoveredFace]);
+  }, [faceGroups, setHoveredFace]);
 
   const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
-    if (selectionMode !== 'face' || !faceGroups.length) return;
+    if (!faceGroups.length) return;
     e.stopPropagation();
 
     if (e.faceIndex != null) {
@@ -184,7 +177,7 @@ function GroupBasedMesh() {
         selectFace(faceGroups[groupIndex].faceId, e.nativeEvent.shiftKey);
       }
     }
-  }, [selectionMode, faceGroups, selectFace]);
+  }, [faceGroups, selectFace]);
 
   if (!geometry) return null;
 
@@ -193,9 +186,9 @@ function GroupBasedMesh() {
       geometry={geometry}
       material={materials}
       rotation={[-Math.PI / 2, 0, 0]}
-      onPointerMove={selectionMode === 'face' ? handlePointerMove : undefined}
-      onPointerOut={selectionMode === 'face' ? () => setHoveredFace(null) : undefined}
-      onClick={selectionMode === 'face' ? handleClick : undefined}
+      onPointerMove={handlePointerMove}
+      onPointerOut={() => setHoveredFace(null)}
+      onClick={handleClick}
     />
   );
 }
@@ -287,17 +280,15 @@ function SelectableEdge({
   );
 }
 
+// Individual edge meshes (always selectable)
 function IndividualEdgeMeshes() {
   const shapeData = useStore((state) => state.shapeData);
-  const selectionMode = useStore((state) => state.selectionMode);
   const selectedEdgeIndices = useStore((state) => state.selectedEdgeIndices);
   const hoveredEdgeIndex = useStore((state) => state.hoveredEdgeIndex);
   const selectEdge = useStore((state) => state.selectEdge);
   const setHoveredEdge = useStore((state) => state.setHoveredEdge);
 
   if (!shapeData || shapeData.individualEdges.length === 0) return null;
-
-  const isSelectionEnabled = selectionMode === 'edge';
 
   return (
     <group>
@@ -308,17 +299,14 @@ function IndividualEdgeMeshes() {
           isSelected={selectedEdgeIndices.has(edge.edgeIndex)}
           isHovered={hoveredEdgeIndex === edge.edgeIndex}
           onSelect={(e) => {
-            if (!isSelectionEnabled) return;
             e.stopPropagation();
             selectEdge(edge.edgeIndex, e.nativeEvent.shiftKey);
           }}
           onHover={(e) => {
-            if (!isSelectionEnabled) return;
             e.stopPropagation();
             setHoveredEdge(edge.edgeIndex);
           }}
           onUnhover={() => {
-            if (!isSelectionEnabled) return;
             setHoveredEdge(null);
           }}
         />
@@ -357,33 +345,31 @@ function SimpleEdges() {
 
 function Scene() {
   const shapeData = useStore((state) => state.shapeData);
-  const selectionMode = useStore((state) => state.selectionMode);
   const clearSelection = useStore((state) => state.clearSelection);
 
   const handleBackgroundClick = useCallback(() => {
-    if (selectionMode !== 'none') {
-      clearSelection();
-    }
-  }, [selectionMode, clearSelection]);
+    clearSelection();
+  }, [clearSelection]);
 
-  // Determine which components to render based on available data and selection mode
+  // Determine which components to render based on available data
+  // Selection is always active for both faces and edges
   const hasIndividualFaces = shapeData && shapeData.individualFaces.length > 0;
   const hasFaceGroups = shapeData && shapeData.mesh.faceGroups.length > 0;
   const hasIndividualEdges = shapeData && shapeData.individualEdges.length > 0;
 
   const renderFaces = () => {
-    if (selectionMode === 'face') {
-      if (hasIndividualFaces) {
-        return <IndividualFaceMeshes />;
-      } else if (hasFaceGroups) {
-        return <GroupBasedMesh />;
-      }
+    // Always render selectable faces when available
+    if (hasIndividualFaces) {
+      return <IndividualFaceMeshes />;
+    } else if (hasFaceGroups) {
+      return <GroupBasedMesh />;
     }
     return <SimpleMesh />;
   };
 
   const renderEdges = () => {
-    if (selectionMode === 'edge' && hasIndividualEdges) {
+    // Always render selectable edges when available
+    if (hasIndividualEdges) {
       return <IndividualEdgeMeshes />;
     }
     return <SimpleEdges />;
@@ -427,9 +413,11 @@ export function Viewer3D() {
   const isEvaluating = useStore((state) => state.isEvaluating);
   const error = useStore((state) => state.error);
   const meshData = useStore((state) => state.meshData);
-  const selectionMode = useStore((state) => state.selectionMode);
+  const shapeData = useStore((state) => state.shapeData);
   const selectedFaceIndices = useStore((state) => state.selectedFaceIndices);
   const selectedEdgeIndices = useStore((state) => state.selectedEdgeIndices);
+
+  const hasSelection = selectedFaceIndices.size > 0 || selectedEdgeIndices.size > 0;
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
@@ -440,7 +428,7 @@ export function Viewer3D() {
         <Scene />
       </Canvas>
 
-      {selectionMode !== 'none' && (
+      {shapeData && (
         <div
           style={{
             position: 'absolute',
@@ -453,17 +441,23 @@ export function Viewer3D() {
             fontSize: '12px',
           }}
         >
-          <div style={{ marginBottom: '4px', fontWeight: 'bold' }}>
-            {selectionMode === 'face' ? 'Face' : 'Edge'} Selection Mode
-          </div>
-          <div style={{ color: '#a6adc8' }}>
-            {selectionMode === 'face'
-              ? `${selectedFaceIndices.size} face(s) selected`
-              : `${selectedEdgeIndices.size} edge(s) selected`}
-          </div>
-          <div style={{ color: '#6c7086', fontSize: '11px', marginTop: '4px' }}>
-            Shift+click for multi-select
-          </div>
+          {hasSelection ? (
+            <>
+              <div style={{ color: '#a6adc8' }}>
+                {selectedFaceIndices.size > 0 && `${selectedFaceIndices.size} face(s)`}
+                {selectedFaceIndices.size > 0 && selectedEdgeIndices.size > 0 && ', '}
+                {selectedEdgeIndices.size > 0 && `${selectedEdgeIndices.size} edge(s)`}
+                {' selected'}
+              </div>
+              <div style={{ color: '#6c7086', fontSize: '11px', marginTop: '4px' }}>
+                Shift+click for multi-select
+              </div>
+            </>
+          ) : (
+            <div style={{ color: '#6c7086' }}>
+              Click to select faces or edges
+            </div>
+          )}
         </div>
       )}
 
