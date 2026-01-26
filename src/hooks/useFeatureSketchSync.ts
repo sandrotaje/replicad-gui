@@ -53,8 +53,8 @@ export function useFeatureSketchSync() {
       lastUpdateSource: null,
     });
 
-    // Track what we synced
-    lastSyncedElementsRef.current = JSON.stringify(sketchElements.map((e) => e.id).sort());
+    // Track what we synced - use FULL element data, not just IDs
+    lastSyncedElementsRef.current = JSON.stringify(sketchElements);
 
     syncInProgressRef.current = false;
   }, [editingSketchId]); // Only re-run when editing starts/stops
@@ -63,10 +63,11 @@ export function useFeatureSketchSync() {
   useEffect(() => {
     if (!editingSketchId || syncInProgressRef.current) return;
 
-    // Check if elements actually changed (by comparing IDs)
-    const currentElementIds = JSON.stringify(legacyElements.map((e) => e.id).sort());
-    if (currentElementIds === lastSyncedElementsRef.current) {
-      return; // No change in element IDs
+    // Check if elements actually changed (compare FULL element data, not just IDs)
+    // This ensures dimension changes and other updates are detected
+    const currentElementsJson = JSON.stringify(legacyElements);
+    if (currentElementsJson === lastSyncedElementsRef.current) {
+      return; // No change in elements
     }
 
     // Update the feature store with the new elements
@@ -88,7 +89,7 @@ export function useFeatureSketchSync() {
       elements: legacyElements as SketchElement[],
     });
 
-    lastSyncedElementsRef.current = currentElementIds;
+    lastSyncedElementsRef.current = currentElementsJson;
   }, [editingSketchId, legacyElements, features, addSketchElement, updateFeature]);
 
   // Clean up when editing stops

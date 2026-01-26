@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { useStore, planesEqual, getElementCenter, getPlaneKey, getPlaneOrientation } from '../store/useStore';
+import { useStore, planesEqual, getElementCenter, getPlaneOrientation } from '../store/useStore';
 import type {
   Point,
   SketchElement,
@@ -69,16 +69,6 @@ export function Sketcher() {
   const sketchPlane = useStore((state) => state.sketchPlane);
   const shapeData = useStore((state) => state.shapeData);
   const faceOutline = useStore((state) => state.faceOutline);
-  const planeDepths = useStore((state) => state.planeDepths);
-  const defaultDepth = useStore((state) => state.defaultDepth);
-  const setPlaneDepth = useStore((state) => state.setPlaneDepth);
-  const planeOperations = useStore((state) => state.planeOperations);
-  const setPlaneOperation = useStore((state) => state.setPlaneOperation);
-
-  // Get current plane's operation type and depth
-  const currentPlaneKey = getPlaneKey(sketchPlane);
-  const currentOperation = planeOperations.get(currentPlaneKey) || 'extrude';
-  const currentDepth = planeDepths.get(currentPlaneKey) ?? defaultDepth;
 
   // Get current plane's orientation
   const currentOrientation = useMemo(
@@ -1601,7 +1591,7 @@ export function Sketcher() {
         <div
           style={{
             position: 'absolute',
-            bottom: 60,
+            bottom: drawingState.tool === 'spline' && drawingState.points.length >= 2 ? 60 : 10,
             left: 10,
             padding: '8px 12px',
             backgroundColor: 'rgba(30, 30, 46, 0.9)',
@@ -1623,101 +1613,18 @@ export function Sketcher() {
         </div>
       )}
 
-      {/* Extrusion controls panel */}
-      <div
-        style={{
-          position: 'absolute',
-          bottom: 10,
-          left: 10,
-          right: 10,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '8px',
-          padding: '8px 12px',
-          backgroundColor: 'rgba(24, 24, 37, 0.95)',
-          borderRadius: '8px',
-          border: '1px solid #313244',
-          flexWrap: 'wrap',
-        }}
-      >
-        <button
-          onClick={() => setPlaneOperation(currentPlaneKey, 'extrude')}
+      {/* Finish spline button for mobile */}
+      {drawingState?.tool === 'spline' && drawingState.points.length >= 2 && (
+        <div
           style={{
-            padding: '8px 12px',
-            border: currentOperation === 'extrude' ? '2px solid #a6e3a1' : '2px solid transparent',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontWeight: 600,
-            fontSize: '12px',
-            backgroundColor: currentOperation === 'extrude' ? '#a6e3a1' : '#313244',
-            color: currentOperation === 'extrude' ? '#1e1e2e' : '#cdd6f4',
+            position: 'absolute',
+            bottom: 10,
+            left: 10,
+            right: 10,
             display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            transition: 'all 0.2s',
-            minWidth: '80px',
             justifyContent: 'center',
           }}
-          title="Extrude sketch upward (add material)"
         >
-          <span style={{ fontSize: '14px' }}>↑</span>
-          Extrude
-        </button>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <label style={{ color: '#a6adc8', fontSize: '12px' }}>
-            Depth:
-          </label>
-          <input
-            type="number"
-            inputMode="decimal"
-            value={currentDepth}
-            onChange={(e) => {
-              const value = parseFloat(e.target.value);
-              if (!isNaN(value) && value > 0) {
-                setPlaneDepth(currentPlaneKey, value);
-              }
-            }}
-            style={{
-              width: '50px',
-              padding: '6px 8px',
-              border: '1px solid #313244',
-              borderRadius: '4px',
-              backgroundColor: '#1e1e2e',
-              color: '#cdd6f4',
-              fontSize: '12px',
-              textAlign: 'center',
-            }}
-          />
-        </div>
-
-        <button
-          onClick={() => setPlaneOperation(currentPlaneKey, 'cut')}
-          style={{
-            padding: '8px 12px',
-            border: currentOperation === 'cut' ? '2px solid #f38ba8' : '2px solid transparent',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontWeight: 600,
-            fontSize: '12px',
-            backgroundColor: currentOperation === 'cut' ? '#f38ba8' : '#313244',
-            color: currentOperation === 'cut' ? '#1e1e2e' : '#cdd6f4',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            transition: 'all 0.2s',
-            minWidth: '60px',
-            justifyContent: 'center',
-          }}
-          title="Cut sketch downward (remove material)"
-        >
-          <span style={{ fontSize: '14px' }}>↓</span>
-          Cut
-        </button>
-
-        {/* Finish spline button for mobile */}
-        {drawingState?.tool === 'spline' && drawingState.points.length >= 2 && (
           <button
             onClick={handleLongPress}
             style={{
@@ -1736,10 +1643,10 @@ export function Sketcher() {
             }}
             title="Finish drawing spline"
           >
-            ✓ Finish Spline
+            Finish Spline
           </button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

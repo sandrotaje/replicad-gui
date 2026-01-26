@@ -296,21 +296,29 @@ export class FeatureEvaluator {
     }
 
     // Handle direction
+    // NOTE: For cuts, we typically want to cut INTO the solid
+    // When sketching on a face, the face normal points outward
+    // So 'normal' direction for a cut should use NEGATIVE depth to cut inward
     let depth: number;
+    const isOnFace = sketch.reference.type === 'face';
+
     switch (cut.direction) {
       case 'normal':
-        depth = depthValue;
+        // For face sketches, 'normal' cuts INTO the solid (negative depth)
+        // For standard planes, 'normal' is positive
+        depth = isOnFace ? -depthValue : depthValue;
         break;
       case 'reverse':
-        depth = -depthValue;
+        // Opposite of normal
+        depth = isOnFace ? depthValue : -depthValue;
         break;
       case 'both':
         // For both directions, we'll need two operations
-        // For now, just use normal direction
-        depth = depthValue;
+        // For now, just use the inward direction
+        depth = isOnFace ? -depthValue : depthValue;
         break;
       default:
-        depth = depthValue;
+        depth = isOnFace ? -depthValue : depthValue;
     }
 
     const depthStr = depth.toFixed(2);
