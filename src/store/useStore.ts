@@ -13,6 +13,17 @@ import type {
 } from '../types';
 import { parseElementsFromCode } from '../utils/codeParser';
 
+// Sketch undo/redo history types
+interface SketchHistoryEntry {
+  elements: SketchElement[];
+}
+
+interface SketchHistory {
+  undoStack: SketchHistoryEntry[];
+  redoStack: SketchHistoryEntry[];
+  maxHistorySize: number;
+}
+
 // Re-export OperationType for convenience
 export type { OperationType } from '../types';
 
@@ -73,6 +84,9 @@ interface AppState {
   // Sync tracking (to prevent infinite loops)
   lastUpdateSource: UpdateSource;
 
+  // Sketch undo/redo history
+  sketchHistory: SketchHistory;
+
   // Actions
   addElement: (element: NewElement) => void;
   updateElement: (id: string, updates: Partial<SketchElement>) => void;
@@ -116,6 +130,13 @@ interface AppState {
   selectLine: (id: string, multiSelect?: boolean) => void;
   selectCircle: (id: string, multiSelect?: boolean) => void;
   clearConstraintSelection: () => void;
+
+  // Sketch undo/redo
+  sketchUndo: () => void;
+  sketchRedo: () => void;
+  canSketchUndo: () => boolean;
+  canSketchRedo: () => boolean;
+  clearSketchHistory: () => void;
 }
 
 // Helper to get a unique key for a plane (for grouping)
@@ -464,6 +485,11 @@ function main() {
   faceOutline: null,
   detectedClosedProfiles: [],
   lastUpdateSource: null,
+  sketchHistory: {
+    undoStack: [],
+    redoStack: [],
+    maxHistorySize: 50,
+  },
 
   // Actions
   addElement: (elemWithoutPlane: NewElement) => {
@@ -481,10 +507,23 @@ function main() {
     } as SketchElement;
     const newElements = [...state.elements, newElement];
     const code = generateReplicadCode(newElements);
+
+    // Push current state to undo stack before making changes
+    const { sketchHistory } = state;
+    const newUndoStack = [
+      ...sketchHistory.undoStack,
+      { elements: state.elements },
+    ].slice(-sketchHistory.maxHistorySize);
+
     set({
       elements: newElements,
       code,
       lastUpdateSource: 'sketch',
+      sketchHistory: {
+        ...sketchHistory,
+        undoStack: newUndoStack,
+        redoStack: [], // Clear redo stack on new action
+      },
     });
   },
 
@@ -498,10 +537,23 @@ function main() {
       return e;
     });
     const code = generateReplicadCode(newElements);
+
+    // Push current state to undo stack before making changes
+    const { sketchHistory } = state;
+    const newUndoStack = [
+      ...sketchHistory.undoStack,
+      { elements: state.elements },
+    ].slice(-sketchHistory.maxHistorySize);
+
     set({
       elements: newElements,
       code,
       lastUpdateSource: 'sketch',
+      sketchHistory: {
+        ...sketchHistory,
+        undoStack: newUndoStack,
+        redoStack: [], // Clear redo stack on new action
+      },
     });
   },
 
@@ -511,10 +563,23 @@ function main() {
       e.id === id ? moveElementByDelta(e, delta) : e
     );
     const code = generateReplicadCode(newElements);
+
+    // Push current state to undo stack before making changes
+    const { sketchHistory } = state;
+    const newUndoStack = [
+      ...sketchHistory.undoStack,
+      { elements: state.elements },
+    ].slice(-sketchHistory.maxHistorySize);
+
     set({
       elements: newElements,
       code,
       lastUpdateSource: 'sketch',
+      sketchHistory: {
+        ...sketchHistory,
+        undoStack: newUndoStack,
+        redoStack: [], // Clear redo stack on new action
+      },
     });
   },
 
@@ -524,11 +589,24 @@ function main() {
     const newSelectedIds = new Set(state.selectedElementIds);
     newSelectedIds.delete(id);
     const code = generateReplicadCode(newElements);
+
+    // Push current state to undo stack before making changes
+    const { sketchHistory } = state;
+    const newUndoStack = [
+      ...sketchHistory.undoStack,
+      { elements: state.elements },
+    ].slice(-sketchHistory.maxHistorySize);
+
     set({
       elements: newElements,
       selectedElementIds: newSelectedIds,
       code,
       lastUpdateSource: 'sketch',
+      sketchHistory: {
+        ...sketchHistory,
+        undoStack: newUndoStack,
+        redoStack: [], // Clear redo stack on new action
+      },
     });
   },
 
@@ -884,6 +962,85 @@ function main() {
       selectedLineIds: [],
       selectedCircleIds: [],
     }),
+
+  // Sketch undo/redo
+  sketchUndo: () => {
+    const state = get();
+    const { undoStack, redoStack, maxHistorySize } = state.sketchHistory;
+
+    if (undoStack.length === 0) return;
+
+    // Pop from undo stack
+    const previousState = undoStack[undoStack.length - 1];
+    const newUndoStack = undoStack.slice(0, -1);
+
+    // Push current state to redo stack
+    const newRedoStack = [
+      ...redoStack,
+      { elements: state.elements },
+    ].slice(-maxHistorySize);
+
+    // Restore previous elements
+    const code = generateReplicadCode(previousState.elements);
+    set({
+      elements: previousState.elements,
+      code,
+      lastUpdateSource: 'sketch',
+      sketchHistory: {
+        ...state.sketchHistory,
+        undoStack: newUndoStack,
+        redoStack: newRedoStack,
+      },
+    });
+  },
+
+  sketchRedo: () => {
+    const state = get();
+    const { undoStack, redoStack, maxHistorySize } = state.sketchHistory;
+
+    if (redoStack.length === 0) return;
+
+    // Pop from redo stack
+    const nextState = redoStack[redoStack.length - 1];
+    const newRedoStack = redoStack.slice(0, -1);
+
+    // Push current state to undo stack
+    const newUndoStack = [
+      ...undoStack,
+      { elements: state.elements },
+    ].slice(-maxHistorySize);
+
+    // Apply next state
+    const code = generateReplicadCode(nextState.elements);
+    set({
+      elements: nextState.elements,
+      code,
+      lastUpdateSource: 'sketch',
+      sketchHistory: {
+        ...state.sketchHistory,
+        undoStack: newUndoStack,
+        redoStack: newRedoStack,
+      },
+    });
+  },
+
+  canSketchUndo: () => {
+    return get().sketchHistory.undoStack.length > 0;
+  },
+
+  canSketchRedo: () => {
+    return get().sketchHistory.redoStack.length > 0;
+  },
+
+  clearSketchHistory: () => {
+    set((state) => ({
+      sketchHistory: {
+        ...state.sketchHistory,
+        undoStack: [],
+        redoStack: [],
+      },
+    }));
+  },
 }));
 
 // Helper to get the orientation of a plane (which standard plane it's parallel to)

@@ -69,9 +69,15 @@ export function useFeatureSketchSync() {
 
     // Store the elements directly in the legacy store
     // We need to update the store state directly to avoid triggering code regeneration
+    // Also clear sketch history when starting a new editing session
     useStore.setState({
       elements: sketchElements,
       lastUpdateSource: null,
+      sketchHistory: {
+        undoStack: [],
+        redoStack: [],
+        maxHistorySize: 50,
+      },
     });
 
     // Track what we synced - use FULL element data, not just IDs
@@ -176,11 +182,16 @@ export function useFeatureSketchSync() {
     return () => {
       // When editing stops, clear the legacy store
       if (!editingSketchId) {
-        // Clear elements and face outline
+        // Clear elements, face outline, and sketch history
         useStore.setState({
           elements: [],
           lastUpdateSource: null,
           faceOutline: null,
+          sketchHistory: {
+            undoStack: [],
+            redoStack: [],
+            maxHistorySize: 50,
+          },
         });
         lastSyncedElementsRef.current = '';
       }

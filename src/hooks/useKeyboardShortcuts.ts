@@ -1,5 +1,6 @@
 import { useEffect, useCallback } from 'react';
 import { useFeatureStore } from '../store/useFeatureStore';
+import { useStore } from '../store/useStore';
 import type { Feature, SketchFeature, ExtrusionFeature, CutFeature } from '../types';
 
 /**
@@ -16,10 +17,11 @@ import type { Feature, SketchFeature, ExtrusionFeature, CutFeature } from '../ty
  * - X: Cut with current sketch (when editing a sketch with elements)
  */
 export function useKeyboardShortcuts() {
-  const undo = useFeatureStore((state) => state.undo);
-  const redo = useFeatureStore((state) => state.redo);
-  const canUndo = useFeatureStore((state) => state.canUndo);
-  const canRedo = useFeatureStore((state) => state.canRedo);
+  // Feature store undo/redo (for non-sketch operations)
+  const featureUndo = useFeatureStore((state) => state.undo);
+  const featureRedo = useFeatureStore((state) => state.redo);
+  const canFeatureUndo = useFeatureStore((state) => state.canUndo);
+  const canFeatureRedo = useFeatureStore((state) => state.canRedo);
   const deleteFeature = useFeatureStore((state) => state.deleteFeature);
   const activeFeatureId = useFeatureStore((state) => state.activeFeatureId);
   const editingSketchId = useFeatureStore((state) => state.editingSketchId);
@@ -30,6 +32,12 @@ export function useKeyboardShortcuts() {
   const generateUniqueName = useFeatureStore((state) => state.generateUniqueName);
   const features = useFeatureStore((state) => state.features);
   const saveToLocalStorage = useFeatureStore((state) => state.saveToLocalStorage);
+
+  // Sketch store undo/redo (for sketch editing operations)
+  const sketchUndo = useStore((state) => state.sketchUndo);
+  const sketchRedo = useStore((state) => state.sketchRedo);
+  const canSketchUndo = useStore((state) => state.canSketchUndo);
+  const canSketchRedo = useStore((state) => state.canSketchRedo);
 
   /**
    * Check if the currently focused element is an input field (text input, textarea, etc.)
@@ -183,21 +191,41 @@ export function useKeyboardShortcuts() {
       const modKey = isMac ? e.metaKey : e.ctrlKey;
 
       // Undo: Ctrl/Cmd + Z (without Shift)
+      // Use sketch undo when editing a sketch, otherwise use feature undo
       if (modKey && e.key.toLowerCase() === 'z' && !e.shiftKey) {
         e.preventDefault();
-        if (canUndo()) {
-          undo();
-          console.log('[Keyboard] Undo triggered');
+        if (editingSketchId) {
+          // Editing a sketch - use sketch-level undo
+          if (canSketchUndo()) {
+            sketchUndo();
+            console.log('[Keyboard] Sketch undo triggered');
+          }
+        } else {
+          // Not editing - use feature-level undo
+          if (canFeatureUndo()) {
+            featureUndo();
+            console.log('[Keyboard] Feature undo triggered');
+          }
         }
         return;
       }
 
       // Redo: Ctrl/Cmd + Shift + Z or Ctrl/Cmd + Y
+      // Use sketch redo when editing a sketch, otherwise use feature redo
       if (modKey && ((e.key.toLowerCase() === 'z' && e.shiftKey) || e.key.toLowerCase() === 'y')) {
         e.preventDefault();
-        if (canRedo()) {
-          redo();
-          console.log('[Keyboard] Redo triggered');
+        if (editingSketchId) {
+          // Editing a sketch - use sketch-level redo
+          if (canSketchRedo()) {
+            sketchRedo();
+            console.log('[Keyboard] Sketch redo triggered');
+          }
+        } else {
+          // Not editing - use feature-level redo
+          if (canFeatureRedo()) {
+            featureRedo();
+            console.log('[Keyboard] Feature redo triggered');
+          }
         }
         return;
       }
@@ -274,10 +302,14 @@ export function useKeyboardShortcuts() {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [
-    undo,
-    redo,
-    canUndo,
-    canRedo,
+    featureUndo,
+    featureRedo,
+    canFeatureUndo,
+    canFeatureRedo,
+    sketchUndo,
+    sketchRedo,
+    canSketchUndo,
+    canSketchRedo,
     activeFeatureId,
     editingSketchId,
     setActiveFeature,
