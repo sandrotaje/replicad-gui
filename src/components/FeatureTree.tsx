@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { useFeatureStore } from '../store/useFeatureStore';
 import { FeatureEditDialog } from './FeatureEditDialog';
+import { BevelEditDialog } from './BevelEditDialog';
 import type {
   Feature,
   SketchFeature,
@@ -409,11 +410,12 @@ function calculateDepth(feature: Feature, allFeatures: Feature[]): number {
   }
 
   // Chamfer and fillet depend on their target feature
+  // They stay at the same level as their target (like extrusion stays at sketch level)
   if (feature.type === 'chamfer' || feature.type === 'fillet') {
     const targetId = (feature as ChamferFeature | FilletFeature).targetFeatureId;
     const target = allFeatures.find((f) => f.id === targetId);
     if (target) {
-      return calculateDepth(target, allFeatures) + 1;
+      return calculateDepth(target, allFeatures);
     }
     return 0;
   }
@@ -499,7 +501,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
             <span>Edit Sketch</span>
           </div>
         )}
-        {(feature.type === 'extrusion' || feature.type === 'cut') && onEditParameters && (
+        {(feature.type === 'extrusion' || feature.type === 'cut' || feature.type === 'chamfer' || feature.type === 'fillet') && onEditParameters && (
           <div
             style={menuItemStyle}
             onClick={() => {
@@ -563,6 +565,9 @@ export const FeatureTree: React.FC = () => {
   // Edit dialog state
   const [editingFeature, setEditingFeature] = useState<ExtrusionFeature | CutFeature | null>(null);
 
+  // Bevel edit dialog state
+  const [editingBevelFeature, setEditingBevelFeature] = useState<ChamferFeature | FilletFeature | null>(null);
+
   // Project menu state
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [projectMenuPosition, setProjectMenuPosition] = useState<{ left: number; top: number } | null>(null);
@@ -583,14 +588,20 @@ export const FeatureTree: React.FC = () => {
         startEditingSketch(feature.id);
       } else if (feature.type === 'extrusion' || feature.type === 'cut') {
         setEditingFeature(feature as ExtrusionFeature | CutFeature);
+      } else if (feature.type === 'chamfer' || feature.type === 'fillet') {
+        setEditingBevelFeature(feature as ChamferFeature | FilletFeature);
       }
     },
     [startEditingSketch]
   );
 
   const handleEditParameters = useCallback(() => {
-    if (contextMenu && (contextMenu.feature.type === 'extrusion' || contextMenu.feature.type === 'cut')) {
-      setEditingFeature(contextMenu.feature as ExtrusionFeature | CutFeature);
+    if (contextMenu) {
+      if (contextMenu.feature.type === 'extrusion' || contextMenu.feature.type === 'cut') {
+        setEditingFeature(contextMenu.feature as ExtrusionFeature | CutFeature);
+      } else if (contextMenu.feature.type === 'chamfer' || contextMenu.feature.type === 'fillet') {
+        setEditingBevelFeature(contextMenu.feature as ChamferFeature | FilletFeature);
+      }
     }
   }, [contextMenu]);
 
@@ -606,6 +617,20 @@ export const FeatureTree: React.FC = () => {
 
   const handleCancelFeatureEdit = useCallback(() => {
     setEditingFeature(null);
+  }, []);
+
+  const handleSaveBevelEdit = useCallback(
+    (updates: Partial<ChamferFeature | FilletFeature>) => {
+      if (editingBevelFeature) {
+        updateFeature(editingBevelFeature.id, updates);
+        setEditingBevelFeature(null);
+      }
+    },
+    [editingBevelFeature, updateFeature]
+  );
+
+  const handleCancelBevelEdit = useCallback(() => {
+    setEditingBevelFeature(null);
   }, []);
 
   const handleContextMenu = useCallback(
@@ -835,6 +860,15 @@ export const FeatureTree: React.FC = () => {
           feature={editingFeature}
           onSave={handleSaveFeatureEdit}
           onCancel={handleCancelFeatureEdit}
+        />
+      )}
+
+      {/* Bevel edit dialog */}
+      {editingBevelFeature && (
+        <BevelEditDialog
+          feature={editingBevelFeature}
+          onSave={handleSaveBevelEdit}
+          onCancel={handleCancelBevelEdit}
         />
       )}
     </div>

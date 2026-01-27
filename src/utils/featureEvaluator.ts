@@ -604,16 +604,20 @@ export class FeatureEvaluator {
     chamfer: ChamferFeature,
     resultVarName: string
   ): string {
+    // If allEdges is set, chamfer all edges without a selector
+    if (chamfer.allEdges) {
+      return `${resultVarName} = ${resultVarName}.chamfer(${chamfer.distance.toFixed(2)});`;
+    }
+
     if (chamfer.edgeIndices.length === 0) {
       return `// Chamfer: No edges selected`;
     }
 
-    // Use edge finder to select edges
-    const edgeSelectors = chamfer.edgeIndices
-      .map((idx) => `(e, i) => i === ${idx}`)
-      .join(' || ');
+    // Select specific edges by index using inList()
+    // result.edges is an array, so we pick the ones we want by index
+    const edgeSelectors = chamfer.edgeIndices.map((idx) => `${resultVarName}.edges[${idx}]`).join(', ');
 
-    return `${resultVarName} = ${resultVarName}.chamfer(${chamfer.distance.toFixed(2)}, (e) => { let i = 0; return ${resultVarName}.edges.some((edge, idx) => { if ((${edgeSelectors})(edge, idx)) { i = idx; return true; } return false; }) ? [${resultVarName}.edges[i]] : []; });`;
+    return `${resultVarName} = ${resultVarName}.chamfer(${chamfer.distance.toFixed(2)}, (e) => e.inList([${edgeSelectors}]));`;
   }
 
   /**
@@ -623,16 +627,20 @@ export class FeatureEvaluator {
     fillet: FilletFeature,
     resultVarName: string
   ): string {
+    // If allEdges is set, fillet all edges without a selector
+    if (fillet.allEdges) {
+      return `${resultVarName} = ${resultVarName}.fillet(${fillet.radius.toFixed(2)});`;
+    }
+
     if (fillet.edgeIndices.length === 0) {
       return `// Fillet: No edges selected`;
     }
 
-    // Use edge finder to select edges
-    const edgeSelectors = fillet.edgeIndices
-      .map((idx) => `(e, i) => i === ${idx}`)
-      .join(' || ');
+    // Select specific edges by index using inList()
+    // result.edges is an array, so we pick the ones we want by index
+    const edgeSelectors = fillet.edgeIndices.map((idx) => `${resultVarName}.edges[${idx}]`).join(', ');
 
-    return `${resultVarName} = ${resultVarName}.fillet(${fillet.radius.toFixed(2)}, (e) => { let i = 0; return ${resultVarName}.edges.some((edge, idx) => { if ((${edgeSelectors})(edge, idx)) { i = idx; return true; } return false; }) ? [${resultVarName}.edges[i]] : []; });`;
+    return `${resultVarName} = ${resultVarName}.fillet(${fillet.radius.toFixed(2)}, (e) => e.inList([${edgeSelectors}]));`;
   }
 
   /**

@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useStore } from '../store/useStore';
 import { useFeatureStore } from '../store/useFeatureStore';
-import type { SketchFeature, ExtrusionFeature, CutFeature, Feature } from '../types';
+import type { SketchFeature, ExtrusionFeature, CutFeature, ChamferFeature, FilletFeature, Feature } from '../types';
 import { exportToSTL } from '../utils/stlExporter';
 import { DepthPromptDialog, type OperationDirection } from './DepthPromptDialog';
+import { BevelDialog, type BevelType } from './BevelDialog';
 
 // Undo/Redo button styles
 const undoRedoButtonStyle = (enabled: boolean) => ({
@@ -28,11 +29,16 @@ interface ToolbarProps {
 export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: ToolbarProps) {
   // Legacy store (for 3D selection and shape data)
   const selectedFaceIndices = useStore((state) => state.selectedFaceIndices);
+  const selectedEdgeIndices = useStore((state) => state.selectedEdgeIndices);
   const shapeData = useStore((state) => state.shapeData);
 
   // Depth prompt dialog state
   const [showDepthDialog, setShowDepthDialog] = useState(false);
   const [pendingOperation, setPendingOperation] = useState<'extrude' | 'cut' | null>(null);
+
+  // Bevel dialog state
+  const [showBevelDialog, setShowBevelDialog] = useState(false);
+  const [pendingBevelType, setPendingBevelType] = useState<BevelType | null>(null);
 
   // Sketch undo/redo
   const sketchUndo = useStore((state) => state.sketchUndo);
@@ -205,6 +211,71 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
     setPendingOperation(null);
   };
 
+  // Find the last solid feature (extrusion or cut) for bevel operations
+  const getLastSolidFeatureId = (): string | null => {
+    const solidFeatures = features.filter(f => f.type === 'extrusion' || f.type === 'cut' || f.type === 'chamfer' || f.type === 'fillet');
+    return solidFeatures.length > 0 ? solidFeatures[solidFeatures.length - 1].id : null;
+  };
+
+  const handleFillet = () => {
+    if (!shapeData) return;
+    setPendingBevelType('fillet');
+    setShowBevelDialog(true);
+  };
+
+  const handleChamfer = () => {
+    if (!shapeData) return;
+    setPendingBevelType('chamfer');
+    setShowBevelDialog(true);
+  };
+
+  const handleBevelConfirm = (value: number, allEdges: boolean) => {
+    if (!pendingBevelType) return;
+
+    const targetFeatureId = getLastSolidFeatureId();
+    if (!targetFeatureId) {
+      console.warn('Cannot add bevel: No solid features found');
+      return;
+    }
+
+    const edgeIndices = allEdges ? [] : Array.from(selectedEdgeIndices);
+
+    if (pendingBevelType === 'fillet') {
+      const filletFeatureData: Omit<FilletFeature, 'id' | 'createdAt' | 'isValid' | 'isDirty'> = {
+        type: 'fillet',
+        name: generateUniqueName('fillet'),
+        targetFeatureId,
+        edgeIndices,
+        allEdges,
+        radius: value,
+        isCollapsed: false,
+      };
+      addFeature(filletFeatureData as Omit<Feature, 'id' | 'createdAt' | 'isValid' | 'isDirty'>);
+    } else {
+      const chamferFeatureData: Omit<ChamferFeature, 'id' | 'createdAt' | 'isValid' | 'isDirty'> = {
+        type: 'chamfer',
+        name: generateUniqueName('chamfer'),
+        targetFeatureId,
+        edgeIndices,
+        allEdges,
+        distance: value,
+        isCollapsed: false,
+      };
+      addFeature(chamferFeatureData as Omit<Feature, 'id' | 'createdAt' | 'isValid' | 'isDirty'>);
+    }
+
+    setShowBevelDialog(false);
+    setPendingBevelType(null);
+    if (isMobile && setToolsOpen) {
+      setToolsOpen(false);
+    }
+  };
+
+  const handleBevelCancel = () => {
+    setShowBevelDialog(false);
+    setPendingBevelType(null);
+  };
+
   const handleFinishSketch = () => {
     stopEditingSketch();
     if (isMobile && setToolsOpen) {
@@ -331,6 +402,26 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
             </div>
           </>
         )}
+
+        {/* Bevel tools (only show when not editing sketch and shape exists) */}
+        {!editingSketchId && shapeData && (
+          <>
+            <button
+              style={featureButtonStyle('#cba6f7')}
+              onClick={handleFillet}
+              title="Add fillet (rounded edges)"
+            >
+              Fillet
+            </button>
+            <button
+              style={featureButtonStyle('#fab387')}
+              onClick={handleChamfer}
+              title="Add chamfer (angled edges)"
+            >
+              Chamfer
+            </button>
+          </>
+        )}
       </div>
 
       {/* Export Section */}
@@ -443,6 +534,26 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
 
       <div style={{ flex: 1 }} />
 
+      {/* Bevel tools (only show when not editing sketch and shape exists) */}
+      {!editingSketchId && shapeData && (
+        <>
+          <button
+            style={featureButtonStyle('#cba6f7')}
+            onClick={handleFillet}
+            title="Add fillet (rounded edges)"
+          >
+            Fillet
+          </button>
+          <button
+            style={featureButtonStyle('#fab387')}
+            onClick={handleChamfer}
+            title="Add chamfer (angled edges)"
+          >
+            Chamfer
+          </button>
+        </>
+      )}
+
       {/* Export */}
       <button
         style={shapeData ? featureButtonStyle('#94e2d5') : disabledButtonStyle()}
@@ -532,6 +643,15 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
         operationType={pendingOperation || 'extrude'}
         onConfirm={handleDepthConfirm}
         onCancel={handleDepthCancel}
+      />
+
+      {/* Bevel dialog */}
+      <BevelDialog
+        isOpen={showBevelDialog}
+        bevelType={pendingBevelType || 'fillet'}
+        selectedEdgeCount={selectedEdgeIndices.size}
+        onConfirm={handleBevelConfirm}
+        onCancel={handleBevelCancel}
       />
     </>
   );

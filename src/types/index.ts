@@ -305,7 +305,8 @@ export interface CutFeature extends FeatureBase {
 export interface ChamferFeature extends FeatureBase {
   type: 'chamfer';
   targetFeatureId: string;         // Which feature to chamfer
-  edgeIndices: number[];           // Which edges
+  edgeIndices: number[];           // Which edges (empty if allEdges is true)
+  allEdges?: boolean;              // Apply to all edges
   distance: number;                // Chamfer distance
 }
 
@@ -313,7 +314,8 @@ export interface ChamferFeature extends FeatureBase {
 export interface FilletFeature extends FeatureBase {
   type: 'fillet';
   targetFeatureId: string;         // Which feature to fillet
-  edgeIndices: number[];           // Which edges
+  edgeIndices: number[];           // Which edges (empty if allEdges is true)
+  allEdges?: boolean;              // Apply to all edges
   radius: number;                  // Fillet radius
 }
 
