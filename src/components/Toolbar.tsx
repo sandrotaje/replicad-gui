@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { useStore } from '../store/useStore';
 import { useFeatureStore } from '../store/useFeatureStore';
-import type { SketchTool, SketchFeature, ExtrusionFeature, CutFeature, Feature } from '../types';
+import type { SketchFeature, ExtrusionFeature, CutFeature, Feature } from '../types';
 import { exportToSTL } from '../utils/stlExporter';
+import { DepthPromptDialog, type OperationDirection } from './DepthPromptDialog';
 
 // Undo/Redo button styles
 const undoRedoButtonStyle = (enabled: boolean) => ({
@@ -24,11 +26,13 @@ interface ToolbarProps {
 }
 
 export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: ToolbarProps) {
-  // Legacy store (for tools, 3D selection, and shape data)
-  const currentTool = useStore((state) => state.currentTool);
-  const setCurrentTool = useStore((state) => state.setCurrentTool);
+  // Legacy store (for 3D selection and shape data)
   const selectedFaceIndices = useStore((state) => state.selectedFaceIndices);
   const shapeData = useStore((state) => state.shapeData);
+
+  // Depth prompt dialog state
+  const [showDepthDialog, setShowDepthDialog] = useState(false);
+  const [pendingOperation, setPendingOperation] = useState<'extrude' | 'cut' | null>(null);
 
   // Sketch undo/redo
   const sketchUndo = useStore((state) => state.sketchUndo);
@@ -64,18 +68,6 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
   const closedProfileCount = editingSketch?.closedProfiles?.length ?? 0;
   const extrudableElementCount = standaloneExtrudableCount + closedProfileCount;
 
-  const buttonStyle = (isActive: boolean) => ({
-    padding: '8px 12px',
-    border: 'none',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontWeight: 500 as const,
-    fontSize: '13px',
-    transition: 'all 0.2s',
-    backgroundColor: isActive ? '#89b4fa' : '#313244',
-    color: isActive ? '#1e1e2e' : '#cdd6f4',
-  });
-
   const featureButtonStyle = (color: string = '#89b4fa') => ({
     padding: '8px 14px',
     border: 'none',
@@ -97,25 +89,6 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
     opacity: 0.5,
     color: '#6c7086',
   });
-
-  // Tool definitions with icons and labels
-  const tools: { tool: SketchTool; icon: string; label: string; title: string }[] = [
-    { tool: 'select', icon: '?', label: 'Select', title: 'Select Tool (V)' },
-    { tool: 'rectangle', icon: '?', label: 'Rect', title: 'Rectangle Tool (R)' },
-    { tool: 'circle', icon: '?', label: 'Circle', title: 'Circle Tool (C)' },
-    { tool: 'line', icon: '/', label: 'Line', title: 'Line Tool (L)' },
-    { tool: 'hline', icon: '-', label: 'H-Line', title: 'Horizontal Line Tool (H)' },
-    { tool: 'vline', icon: '|', label: 'V-Line', title: 'Vertical Line Tool (Shift+V)' },
-    { tool: 'arc', icon: '(', label: 'Arc', title: 'Arc Tool (A)' },
-    { tool: 'spline', icon: '~', label: 'Spline', title: 'Spline Tool (S)' },
-  ];
-
-  const handleToolSelect = (tool: SketchTool) => {
-    setCurrentTool(tool);
-    if (isMobile && setToolsOpen) {
-      setToolsOpen(false);
-    }
-  };
 
   // Feature handlers
   const handleNewSketch = () => {
@@ -174,25 +147,8 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
 
   const handleExtrude = () => {
     if (!editingSketchId || extrudableElementCount === 0) return;
-
-    // Determine if this is the first solid or should fuse with existing
-    const hasExistingExtrusions = features.some(f => f.type === 'extrusion');
-
-    const extrusionFeatureData: Omit<ExtrusionFeature, 'id' | 'createdAt' | 'isValid' | 'isDirty'> = {
-      type: 'extrusion',
-      name: generateUniqueName('extrusion'),
-      sketchId: editingSketchId,
-      depth: 10, // Default depth
-      direction: 'normal',
-      operation: hasExistingExtrusions ? 'fuse' : 'new',
-      isCollapsed: false,
-    };
-    addFeature(extrusionFeatureData as Omit<Feature, 'id' | 'createdAt' | 'isValid' | 'isDirty'>);
-
-    stopEditingSketch();
-    if (isMobile && setToolsOpen) {
-      setToolsOpen(false);
-    }
+    setPendingOperation('extrude');
+    setShowDepthDialog(true);
   };
 
   const handleCut = () => {
@@ -205,20 +161,48 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
       return;
     }
 
-    const cutFeatureData: Omit<CutFeature, 'id' | 'createdAt' | 'isValid' | 'isDirty'> = {
-      type: 'cut',
-      name: generateUniqueName('cut'),
-      sketchId: editingSketchId,
-      depth: 10, // Default depth
-      direction: 'normal',
-      isCollapsed: false,
-    };
-    addFeature(cutFeatureData as Omit<Feature, 'id' | 'createdAt' | 'isValid' | 'isDirty'>);
+    setPendingOperation('cut');
+    setShowDepthDialog(true);
+  };
 
+  const handleDepthConfirm = (depth: number, direction: OperationDirection, throughAll: boolean) => {
+    if (!editingSketchId || !pendingOperation) return;
+
+    if (pendingOperation === 'extrude') {
+      const hasExistingExtrusions = features.some(f => f.type === 'extrusion');
+      const extrusionFeatureData: Omit<ExtrusionFeature, 'id' | 'createdAt' | 'isValid' | 'isDirty'> = {
+        type: 'extrusion',
+        name: generateUniqueName('extrusion'),
+        sketchId: editingSketchId,
+        depth,
+        direction: direction === 'both' ? 'normal' : direction,
+        operation: hasExistingExtrusions ? 'fuse' : 'new',
+        isCollapsed: false,
+      };
+      addFeature(extrusionFeatureData as Omit<Feature, 'id' | 'createdAt' | 'isValid' | 'isDirty'>);
+    } else if (pendingOperation === 'cut') {
+      const cutFeatureData: Omit<CutFeature, 'id' | 'createdAt' | 'isValid' | 'isDirty'> = {
+        type: 'cut',
+        name: generateUniqueName('cut'),
+        sketchId: editingSketchId,
+        depth: throughAll ? 'through' : depth,
+        direction,
+        isCollapsed: false,
+      };
+      addFeature(cutFeatureData as Omit<Feature, 'id' | 'createdAt' | 'isValid' | 'isDirty'>);
+    }
+
+    setShowDepthDialog(false);
+    setPendingOperation(null);
     stopEditingSketch();
     if (isMobile && setToolsOpen) {
       setToolsOpen(false);
     }
+  };
+
+  const handleDepthCancel = () => {
+    setShowDepthDialog(false);
+    setPendingOperation(null);
   };
 
   const handleFinishSketch = () => {
@@ -349,26 +333,6 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
         )}
       </div>
 
-      <div className="tool-section">
-        <span className="section-label">Drawing Tools</span>
-        {tools.map(({ tool, icon, label, title }) => (
-          <button
-            key={tool}
-            style={{
-              ...buttonStyle(currentTool === tool),
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-            }}
-            onClick={() => handleToolSelect(tool)}
-            title={title}
-          >
-            <span style={{ fontSize: '16px' }}>{icon}</span>
-            <span>{label}</span>
-          </button>
-        ))}
-      </div>
-
       {/* Export Section */}
       <div className="tool-section">
         <span className="section-label">Export</span>
@@ -477,28 +441,6 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
         </>
       )}
 
-      <div
-        style={{
-          width: '1px',
-          height: '24px',
-          backgroundColor: '#313244',
-        }}
-      />
-
-      {/* Drawing Tools */}
-      <div style={{ display: 'flex', gap: '4px' }}>
-        {tools.map(({ tool, icon, label, title }) => (
-          <button
-            key={tool}
-            style={buttonStyle(currentTool === tool)}
-            onClick={() => setCurrentTool(tool)}
-            title={title}
-          >
-            {icon} {label}
-          </button>
-        ))}
-      </div>
-
       <div style={{ flex: 1 }} />
 
       {/* Export */}
@@ -542,26 +484,8 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
           gap: '6px',
         }}
       >
-        = Tools
+        = Menu
       </button>
-
-      {/* Current tool indicator */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px',
-        padding: '6px 12px',
-        backgroundColor: '#313244',
-        borderRadius: '6px',
-        fontSize: '13px',
-      }}>
-        <span style={{ color: '#89b4fa' }}>
-          {tools.find(t => t.tool === currentTool)?.icon}
-        </span>
-        <span style={{ color: '#cdd6f4' }}>
-          {tools.find(t => t.tool === currentTool)?.label}
-        </span>
-      </div>
 
       {/* Editing indicator */}
       {editingSketchId && editingSketch && (
@@ -601,6 +525,14 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
         {isMobile ? renderMobileToolbar() : renderDesktopToolbar()}
       </div>
       {isMobile && renderMobileToolsDrawer()}
+
+      {/* Depth prompt dialog */}
+      <DepthPromptDialog
+        isOpen={showDepthDialog}
+        operationType={pendingOperation || 'extrude'}
+        onConfirm={handleDepthConfirm}
+        onCancel={handleDepthCancel}
+      />
     </>
   );
 }

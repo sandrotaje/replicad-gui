@@ -5,6 +5,14 @@ import { extractSolverPrimitives } from '../utils/sketchToSolver';
 import { detectAutoConstraints } from '../utils/autoConstraints';
 import FloatingConstraints from './FloatingConstraints';
 import {
+  SelectIcon,
+  RectangleIcon,
+  CircleIcon,
+  LineIcon,
+  ArcIcon,
+  SplineIcon,
+} from './icons/ToolIcons';
+import {
   ConstraintType,
   type Point,
   type SketchElement,
@@ -84,6 +92,7 @@ export function Sketcher() {
   const sketchPlane = useStore((state) => state.sketchPlane);
   const shapeData = useStore((state) => state.shapeData);
   const faceOutline = useStore((state) => state.faceOutline);
+  const setCurrentTool = useStore((state) => state.setCurrentTool);
 
   // Constraint selection state from store
   const selectedPointIds = useStore((state) => state.selectedPointIds);
@@ -914,37 +923,6 @@ export function Sketcher() {
           break;
         }
 
-        case 'hline': {
-          const start = worldToScreen(startPoint.x, startPoint.y);
-          const end = worldToScreen(currentPoint.x, startPoint.y);
-
-          ctx.beginPath();
-          ctx.moveTo(start.x, start.y);
-          ctx.lineTo(end.x, end.y);
-          ctx.stroke();
-
-          const length = currentPoint.x - startPoint.x;
-          ctx.fillStyle = '#cdd6f4';
-          ctx.font = '12px monospace';
-          ctx.fillText(`L = ${Math.abs(length).toFixed(0)}`, (start.x + end.x) / 2, start.y - 10);
-          break;
-        }
-
-        case 'vline': {
-          const start = worldToScreen(startPoint.x, startPoint.y);
-          const end = worldToScreen(startPoint.x, currentPoint.y);
-
-          ctx.beginPath();
-          ctx.moveTo(start.x, start.y);
-          ctx.lineTo(end.x, end.y);
-          ctx.stroke();
-
-          const length = currentPoint.y - startPoint.y;
-          ctx.fillStyle = '#cdd6f4';
-          ctx.font = '12px monospace';
-          ctx.fillText(`L = ${Math.abs(length).toFixed(0)}`, start.x + 10, (start.y + end.y) / 2);
-          break;
-        }
       }
 
       ctx.setLineDash([]);
@@ -1416,36 +1394,6 @@ export function Sketcher() {
           }
           break;
         }
-
-        case 'hline': {
-          const length = currentPoint.x - startPoint.x;
-          if (length !== 0) {
-            const newElement = {
-              type: 'hline' as const,
-              id: crypto.randomUUID(),
-              start: startPoint,
-              length,
-            };
-            addElement(newElement);
-            applyAutoConstraints(newElement as SketchElement);
-          }
-          break;
-        }
-
-        case 'vline': {
-          const length = currentPoint.y - startPoint.y;
-          if (length !== 0) {
-            const newElement = {
-              type: 'vline' as const,
-              id: crypto.randomUUID(),
-              start: startPoint,
-              length,
-            };
-            addElement(newElement);
-            applyAutoConstraints(newElement as SketchElement);
-          }
-          break;
-        }
       }
     }
 
@@ -1900,36 +1848,6 @@ export function Sketcher() {
           }
           break;
         }
-
-        case 'hline': {
-          const length = currentPoint.x - startPoint.x;
-          if (length !== 0) {
-            const newElement = {
-              type: 'hline' as const,
-              id: crypto.randomUUID(),
-              start: startPoint,
-              length,
-            };
-            addElement(newElement);
-            applyAutoConstraints(newElement as SketchElement);
-          }
-          break;
-        }
-
-        case 'vline': {
-          const length = currentPoint.y - startPoint.y;
-          if (length !== 0) {
-            const newElement = {
-              type: 'vline' as const,
-              id: crypto.randomUUID(),
-              start: startPoint,
-              length,
-            };
-            addElement(newElement);
-            applyAutoConstraints(newElement as SketchElement);
-          }
-          break;
-        }
       }
     }
 
@@ -2156,6 +2074,31 @@ export function Sketcher() {
     return 'crosshair';
   };
 
+  // Tool definitions for floating toolbar
+  const tools: { tool: SketchTool; icon: React.ReactNode; title: string }[] = [
+    { tool: 'select', icon: <SelectIcon size={18} />, title: 'Select (V)' },
+    { tool: 'rectangle', icon: <RectangleIcon size={18} />, title: 'Rectangle (R)' },
+    { tool: 'circle', icon: <CircleIcon size={18} />, title: 'Circle (C)' },
+    { tool: 'line', icon: <LineIcon size={18} />, title: 'Line (L)' },
+    { tool: 'arc', icon: <ArcIcon size={18} />, title: 'Arc (A)' },
+    { tool: 'spline', icon: <SplineIcon size={18} />, title: 'Spline (S)' },
+  ];
+
+  // Floating toolbar button style
+  const toolButtonStyle = (isActive: boolean) => ({
+    width: '36px',
+    height: '36px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    transition: 'all 0.15s',
+    backgroundColor: isActive ? '#89b4fa' : 'transparent',
+    color: isActive ? '#1e1e2e' : '#cdd6f4',
+  });
+
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%', overflow: 'hidden', position: 'relative' }}>
       <canvas
@@ -2233,13 +2176,42 @@ export function Sketcher() {
         </div>
       )}
 
+      {/* Floating toolbar - only show when editing a sketch */}
+      {editingSketchId && (
+        <div
+          style={{
+            position: 'absolute',
+            left: '16px',
+            bottom: '16px',
+            display: 'flex',
+            gap: '4px',
+            padding: '6px',
+            backgroundColor: 'rgba(30, 30, 46, 0.95)',
+            borderRadius: '10px',
+            border: '1px solid #45475a',
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+          }}
+        >
+          {tools.map(({ tool, icon, title }) => (
+            <button
+              key={tool}
+              style={toolButtonStyle(currentTool === tool)}
+              onClick={() => setCurrentTool(tool)}
+              title={title}
+            >
+              {icon}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Tool hint overlay */}
       {drawingState && (
         <div
           style={{
             position: 'absolute',
-            bottom: drawingState.tool === 'spline' && drawingState.points.length >= 2 ? 60 : 10,
-            left: 10,
+            bottom: drawingState.tool === 'spline' && drawingState.points.length >= 2 ? 120 : 70,
+            left: 16,
             padding: '8px 12px',
             backgroundColor: 'rgba(30, 30, 46, 0.9)',
             borderRadius: '6px',
@@ -2265,11 +2237,11 @@ export function Sketcher() {
         <div
           style={{
             position: 'absolute',
-            bottom: 10,
-            left: 10,
-            right: 10,
+            bottom: 70,
+            left: 16,
+            right: 16,
             display: 'flex',
-            justifyContent: 'center',
+            justifyContent: 'flex-start',
           }}
         >
           <button

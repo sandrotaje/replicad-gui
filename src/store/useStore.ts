@@ -425,8 +425,8 @@ function main() {
     const elem = committedElements[i];
     const elemCode = generateElementCode(elem, true);
 
-    // Skip non-extrudable shapes for now
-    const isExtrudable = elem.type === 'rectangle' || elem.type === 'circle';
+    // Skip non-extrudable shapes for now (arc and spline are extrudable when closed)
+    const isExtrudable = elem.type === 'rectangle' || elem.type === 'circle' || elem.type === 'arc' || elem.type === 'spline';
     if (!isExtrudable) {
       lines.push(`  // Skipping non-extrudable element: ${elem.type}`);
       continue;

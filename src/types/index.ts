@@ -101,8 +101,6 @@ export type SketchTool =
   | 'rectangle'
   | 'circle'
   | 'line'
-  | 'hline'
-  | 'vline'
   | 'arc'
   | 'spline';
 
