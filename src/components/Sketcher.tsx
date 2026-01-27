@@ -2,11 +2,13 @@ import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useStore, planesEqual, getElementCenter, getPlaneOrientation } from '../store/useStore';
 import { useFeatureStore } from '../store/useFeatureStore';
 import { extractSolverPrimitives } from '../utils/sketchToSolver';
+import { detectAutoConstraints } from '../utils/autoConstraints';
 import FloatingConstraints from './FloatingConstraints';
 import {
   ConstraintType,
   type Point,
   type SketchElement,
+  type SketchFeature,
   type RectangleElement,
   type LineElement,
   type HLineElement,
@@ -97,6 +99,15 @@ export function Sketcher() {
   const editingSketchId = useFeatureStore((state) => state.editingSketchId);
   const addConstraint = useFeatureStore((state) => state.addConstraint);
   const solveConstraints = useFeatureStore((state) => state.solveConstraints);
+  const featureById = useFeatureStore((state) => state.featureById);
+
+  // Get existing constraints from current sketch
+  const existingConstraints = useMemo(() => {
+    if (!editingSketchId) return [];
+    const feature = featureById.get(editingSketchId);
+    if (!feature || feature.type !== 'sketch') return [];
+    return (feature as SketchFeature).constraints;
+  }, [editingSketchId, featureById]);
 
   // Get current plane's orientation
   const currentOrientation = useMemo(
@@ -188,6 +199,32 @@ export function Sketcher() {
       return { x, y };
     },
     [scale, offset]
+  );
+
+  // Apply auto-constraints for a newly added element
+  const applyAutoConstraints = useCallback(
+    (newElement: SketchElement) => {
+      if (!editingSketchId) return;
+
+      const result = detectAutoConstraints(
+        newElement,
+        currentPlaneElements,
+        existingConstraints
+      );
+
+      if (result.constraints.length > 0) {
+        console.log('[Sketcher] Auto-constraints detected:', result.description);
+
+        // Add each detected constraint
+        for (const constraintData of result.constraints) {
+          addConstraint(editingSketchId, constraintData);
+        }
+
+        // Solve constraints to apply them
+        solveConstraints(editingSketchId);
+      }
+    },
+    [editingSketchId, currentPlaneElements, existingConstraints, addConstraint, solveConstraints]
   );
 
   // Hit testing for elements
@@ -1189,14 +1226,16 @@ export function Sketcher() {
         );
         const endAngle = Math.atan2(point.y - center.y, point.x - center.x);
 
-        addElement({
-          type: 'arc',
+        const newElement = {
+          type: 'arc' as const,
           id: crypto.randomUUID(),
           center,
           radius,
           startAngle,
           endAngle,
-        });
+        };
+        addElement(newElement);
+        applyAutoConstraints(newElement as SketchElement);
         setDrawingState(null);
       }
     } else if (currentTool === 'spline') {
@@ -1321,8 +1360,8 @@ export function Sketcher() {
           const width = Math.abs(currentPoint.x - startPoint.x);
           const height = Math.abs(currentPoint.y - startPoint.y);
           if (width > 0 && height > 0) {
-            addElement({
-              type: 'rectangle',
+            const newElement = {
+              type: 'rectangle' as const,
               id: crypto.randomUUID(),
               start: {
                 x: Math.min(startPoint.x, currentPoint.x),
@@ -1332,7 +1371,9 @@ export function Sketcher() {
                 x: Math.max(startPoint.x, currentPoint.x),
                 y: Math.max(startPoint.y, currentPoint.y),
               },
-            });
+            };
+            addElement(newElement);
+            applyAutoConstraints(newElement as SketchElement);
           }
           break;
         }
@@ -1342,12 +1383,14 @@ export function Sketcher() {
             (currentPoint.x - startPoint.x) ** 2 + (currentPoint.y - startPoint.y) ** 2
           );
           if (radius > 0) {
-            addElement({
-              type: 'circle',
+            const newElement = {
+              type: 'circle' as const,
               id: crypto.randomUUID(),
               center: startPoint,
               radius,
-            });
+            };
+            addElement(newElement);
+            applyAutoConstraints(newElement as SketchElement);
           }
           break;
         }
@@ -1356,12 +1399,14 @@ export function Sketcher() {
           const dx = currentPoint.x - startPoint.x;
           const dy = currentPoint.y - startPoint.y;
           if (dx !== 0 || dy !== 0) {
-            addElement({
-              type: 'line',
+            const newElement = {
+              type: 'line' as const,
               id: crypto.randomUUID(),
               start: startPoint,
               end: currentPoint,
-            });
+            };
+            addElement(newElement);
+            applyAutoConstraints(newElement as SketchElement);
           }
           break;
         }
@@ -1369,12 +1414,14 @@ export function Sketcher() {
         case 'hline': {
           const length = currentPoint.x - startPoint.x;
           if (length !== 0) {
-            addElement({
-              type: 'hline',
+            const newElement = {
+              type: 'hline' as const,
               id: crypto.randomUUID(),
               start: startPoint,
               length,
-            });
+            };
+            addElement(newElement);
+            applyAutoConstraints(newElement as SketchElement);
           }
           break;
         }
@@ -1382,12 +1429,14 @@ export function Sketcher() {
         case 'vline': {
           const length = currentPoint.y - startPoint.y;
           if (length !== 0) {
-            addElement({
-              type: 'vline',
+            const newElement = {
+              type: 'vline' as const,
               id: crypto.randomUUID(),
               start: startPoint,
               length,
-            });
+            };
+            addElement(newElement);
+            applyAutoConstraints(newElement as SketchElement);
           }
           break;
         }
@@ -1405,11 +1454,13 @@ export function Sketcher() {
 
     if (drawingState?.tool === 'spline' && drawingState.points.length >= 2) {
       // Finish spline
-      addElement({
-        type: 'spline',
+      const newElement = {
+        type: 'spline' as const,
         id: crypto.randomUUID(),
         points: drawingState.points,
-      });
+      };
+      addElement(newElement);
+      applyAutoConstraints(newElement as SketchElement);
       setDrawingState(null);
     }
   };
@@ -1788,8 +1839,8 @@ export function Sketcher() {
           const width = Math.abs(currentPoint.x - startPoint.x);
           const height = Math.abs(currentPoint.y - startPoint.y);
           if (width > 0 && height > 0) {
-            addElement({
-              type: 'rectangle',
+            const newElement = {
+              type: 'rectangle' as const,
               id: crypto.randomUUID(),
               start: {
                 x: Math.min(startPoint.x, currentPoint.x),
@@ -1799,7 +1850,9 @@ export function Sketcher() {
                 x: Math.max(startPoint.x, currentPoint.x),
                 y: Math.max(startPoint.y, currentPoint.y),
               },
-            });
+            };
+            addElement(newElement);
+            applyAutoConstraints(newElement as SketchElement);
           }
           break;
         }
@@ -1809,12 +1862,14 @@ export function Sketcher() {
             (currentPoint.x - startPoint.x) ** 2 + (currentPoint.y - startPoint.y) ** 2
           );
           if (radius > 0) {
-            addElement({
-              type: 'circle',
+            const newElement = {
+              type: 'circle' as const,
               id: crypto.randomUUID(),
               center: startPoint,
               radius,
-            });
+            };
+            addElement(newElement);
+            applyAutoConstraints(newElement as SketchElement);
           }
           break;
         }
@@ -1823,12 +1878,14 @@ export function Sketcher() {
           const dx = currentPoint.x - startPoint.x;
           const dy = currentPoint.y - startPoint.y;
           if (dx !== 0 || dy !== 0) {
-            addElement({
-              type: 'line',
+            const newElement = {
+              type: 'line' as const,
               id: crypto.randomUUID(),
               start: startPoint,
               end: currentPoint,
-            });
+            };
+            addElement(newElement);
+            applyAutoConstraints(newElement as SketchElement);
           }
           break;
         }
@@ -1836,12 +1893,14 @@ export function Sketcher() {
         case 'hline': {
           const length = currentPoint.x - startPoint.x;
           if (length !== 0) {
-            addElement({
-              type: 'hline',
+            const newElement = {
+              type: 'hline' as const,
               id: crypto.randomUUID(),
               start: startPoint,
               length,
-            });
+            };
+            addElement(newElement);
+            applyAutoConstraints(newElement as SketchElement);
           }
           break;
         }
@@ -1849,12 +1908,14 @@ export function Sketcher() {
         case 'vline': {
           const length = currentPoint.y - startPoint.y;
           if (length !== 0) {
-            addElement({
-              type: 'vline',
+            const newElement = {
+              type: 'vline' as const,
               id: crypto.randomUUID(),
               start: startPoint,
               length,
-            });
+            };
+            addElement(newElement);
+            applyAutoConstraints(newElement as SketchElement);
           }
           break;
         }
@@ -1869,14 +1930,16 @@ export function Sketcher() {
   // Long press handler for finishing spline on mobile
   const handleLongPress = useCallback(() => {
     if (drawingState?.tool === 'spline' && drawingState.points.length >= 2) {
-      addElement({
-        type: 'spline',
+      const newElement = {
+        type: 'spline' as const,
         id: crypto.randomUUID(),
         points: drawingState.points,
-      });
+      };
+      addElement(newElement);
+      applyAutoConstraints(newElement as SketchElement);
       setDrawingState(null);
     }
-  }, [drawingState, addElement]);
+  }, [drawingState, addElement, applyAutoConstraints]);
 
   // Escape key to cancel drawing
   useEffect(() => {
