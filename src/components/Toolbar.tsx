@@ -3,6 +3,20 @@ import { useFeatureStore } from '../store/useFeatureStore';
 import type { SketchTool, SketchFeature, ExtrusionFeature, CutFeature, Feature } from '../types';
 import { exportToSTL } from '../utils/stlExporter';
 
+// Undo/Redo button styles
+const undoRedoButtonStyle = (enabled: boolean) => ({
+  padding: '6px 10px',
+  border: '1px solid #45475a',
+  borderRadius: '6px',
+  cursor: enabled ? 'pointer' : 'not-allowed',
+  fontWeight: 500 as const,
+  fontSize: '14px',
+  backgroundColor: 'transparent',
+  color: enabled ? '#cdd6f4' : '#45475a',
+  opacity: enabled ? 1 : 0.5,
+  transition: 'all 0.2s',
+});
+
 interface ToolbarProps {
   isMobile?: boolean;
   toolsOpen?: boolean;
@@ -15,6 +29,12 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
   const setCurrentTool = useStore((state) => state.setCurrentTool);
   const selectedFaceIndices = useStore((state) => state.selectedFaceIndices);
   const shapeData = useStore((state) => state.shapeData);
+
+  // Sketch undo/redo
+  const sketchUndo = useStore((state) => state.sketchUndo);
+  const sketchRedo = useStore((state) => state.sketchRedo);
+  const canSketchUndo = useStore((state) => state.canSketchUndo);
+  const canSketchRedo = useStore((state) => state.canSketchRedo);
 
   // Feature store
   const features = useFeatureStore((state) => state.features);
@@ -291,6 +311,40 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
             >
               Finish Sketch
             </button>
+
+            {/* Undo/Redo buttons */}
+            <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+              <button
+                style={{
+                  ...undoRedoButtonStyle(canSketchUndo()),
+                  flex: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                }}
+                onClick={sketchUndo}
+                disabled={!canSketchUndo()}
+                title="Undo (Cmd/Ctrl+Z)"
+              >
+                ↩ Undo
+              </button>
+              <button
+                style={{
+                  ...undoRedoButtonStyle(canSketchRedo()),
+                  flex: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                }}
+                onClick={sketchRedo}
+                disabled={!canSketchRedo()}
+                title="Redo (Cmd/Ctrl+Shift+Z)"
+              >
+                ↪ Redo
+              </button>
+            </div>
           </>
         )}
       </div>
@@ -393,6 +447,32 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
             title="Finish editing without creating a feature (Esc)"
           >
             Finish
+          </button>
+
+          {/* Undo/Redo buttons */}
+          <div
+            style={{
+              width: '1px',
+              height: '24px',
+              backgroundColor: '#313244',
+              marginLeft: '4px',
+            }}
+          />
+          <button
+            style={undoRedoButtonStyle(canSketchUndo())}
+            onClick={sketchUndo}
+            disabled={!canSketchUndo()}
+            title="Undo (Cmd/Ctrl+Z)"
+          >
+            ↩
+          </button>
+          <button
+            style={undoRedoButtonStyle(canSketchRedo())}
+            onClick={sketchRedo}
+            disabled={!canSketchRedo()}
+            title="Redo (Cmd/Ctrl+Shift+Z)"
+          >
+            ↪
           </button>
         </>
       )}
