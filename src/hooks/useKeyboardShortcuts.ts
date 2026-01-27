@@ -79,6 +79,7 @@ export function useKeyboardShortcuts() {
       elements: [],
       isClosed: false,
       isCollapsed: false,
+      constraints: [],
     };
     const sketchId = addFeature(sketchData as Omit<Feature, 'id' | 'createdAt' | 'isValid' | 'isDirty'>);
     startEditingSketch(sketchId);

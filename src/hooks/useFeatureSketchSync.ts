@@ -13,6 +13,7 @@ import type { SketchFeature, SketchElement, FacePlane } from '../types';
 export function useFeatureSketchSync() {
   const syncInProgressRef = useRef(false);
   const lastSyncedElementsRef = useRef<string>('');
+  const lastFeatureElementsRef = useRef<string>('');
 
   // Feature store state
   const editingSketchId = useFeatureStore((state) => state.editingSketchId);
@@ -22,6 +23,7 @@ export function useFeatureSketchSync() {
 
   // Legacy store state
   const legacyElements = useStore((state) => state.elements);
+  const detectedClosedProfiles = useStore((state) => state.detectedClosedProfiles);
 
   // Get the current editing sketch from the feature store
   const editingSketch = editingSketchId
@@ -73,13 +75,12 @@ export function useFeatureSketchSync() {
     });
 
     // Track what we synced - use FULL element data, not just IDs
-    lastSyncedElementsRef.current = JSON.stringify(sketchElements);
+    const elementsJson = JSON.stringify(sketchElements);
+    lastSyncedElementsRef.current = elementsJson;
+    lastFeatureElementsRef.current = elementsJson;
 
     syncInProgressRef.current = false;
   }, [editingSketchId]); // Only re-run when editing starts/stops
-
-  // Get detected closed profiles from the legacy store
-  const detectedClosedProfiles = useStore((state) => state.detectedClosedProfiles);
 
   // Sync from legacy store to feature store when elements change
   useEffect(() => {
@@ -131,6 +132,44 @@ export function useFeatureSketchSync() {
       });
     }
   }, [editingSketchId, detectedClosedProfiles, features, updateFeature]);
+
+  // Sync from feature store to legacy store when feature elements change
+  // This handles constraint solving and other feature-side updates
+  useEffect(() => {
+    if (!editingSketch || syncInProgressRef.current) return;
+
+    const featureElementsJson = JSON.stringify(editingSketch.elements);
+
+    // Skip if feature store hasn't changed
+    if (featureElementsJson === lastFeatureElementsRef.current) {
+      return;
+    }
+
+    // Update our feature tracking
+    const previousFeatureJson = lastFeatureElementsRef.current;
+    lastFeatureElementsRef.current = featureElementsJson;
+
+    // If this is the first time we're seeing this feature, don't sync
+    // (initial sync is handled by the first effect)
+    if (previousFeatureJson === '') {
+      return;
+    }
+
+    // Check if the change came from the feature store (not from our sync to it)
+    // This is detected when feature elements differ from what we last synced to legacy
+    if (featureElementsJson !== lastSyncedElementsRef.current) {
+      // Feature store changed independently (e.g., constraint solving), sync back to legacy store
+      syncInProgressRef.current = true;
+
+      useStore.setState({
+        elements: editingSketch.elements,
+        lastUpdateSource: null,
+      });
+
+      lastSyncedElementsRef.current = featureElementsJson;
+      syncInProgressRef.current = false;
+    }
+  }, [editingSketch]);
 
   // Clean up when editing stops
   useEffect(() => {

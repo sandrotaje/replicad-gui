@@ -190,6 +190,55 @@ export interface WorkerMessage {
   error?: string;
 }
 
+// ============ CONSTRAINT SOLVER TYPES ============
+
+// Solver primitives (point-reference model)
+export interface SolverPoint {
+  id: string;
+  x: number;
+  y: number;
+  fixed?: boolean;
+  elementId: string;      // Which SketchElement this belongs to
+  role: 'start' | 'end' | 'center' | 'corner' | 'control';
+}
+
+export interface SolverLine {
+  id: string;
+  p1: string;  // Point ID
+  p2: string;  // Point ID
+}
+
+export interface SolverCircle {
+  id: string;
+  center: string;  // Point ID
+  radius: number;
+}
+
+export const ConstraintType = {
+  HORIZONTAL: 'HORIZONTAL',
+  VERTICAL: 'VERTICAL',
+  DISTANCE: 'DISTANCE',
+  COINCIDENT: 'COINCIDENT',
+  FIXED: 'FIXED',
+  EQUAL_LENGTH: 'EQUAL_LENGTH',
+  RADIUS: 'RADIUS',
+  ANGLE: 'ANGLE',
+  PARALLEL: 'PARALLEL',
+  TANGENT: 'TANGENT',
+  MIDPOINT: 'MIDPOINT'
+} as const;
+
+export type ConstraintType = typeof ConstraintType[keyof typeof ConstraintType];
+
+export interface Constraint {
+  id: string;
+  type: ConstraintType;
+  points: string[];
+  lines: string[];
+  circles: string[];
+  value?: number;
+}
+
 // ============ FEATURE TYPES ============
 
 export type FeatureType =
@@ -234,6 +283,7 @@ export interface SketchFeature extends FeatureBase {
   elements: SketchElement[];       // 2D sketch elements (existing type)
   isClosed: boolean;               // Is the sketch a closed profile? (legacy, for single-element profiles)
   closedProfiles?: ClosedProfileGroup[];  // Detected closed profiles from chained elements
+  constraints: Constraint[];       // Geometric constraints
 }
 
 // Extrusion Feature - extrudes a sketch

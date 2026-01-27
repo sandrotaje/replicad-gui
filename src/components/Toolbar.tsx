@@ -106,6 +106,7 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
       elements: [],
       isClosed: false,
       isCollapsed: false,
+      constraints: [],
     };
     const sketchId = addFeature(sketchFeatureData as Omit<Feature, 'id' | 'createdAt' | 'isValid' | 'isDirty'>);
     startEditingSketch(sketchId);
@@ -142,6 +143,7 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
       elements: [],
       isClosed: false,
       isCollapsed: false,
+      constraints: [],
     };
     const sketchId = addFeature(sketchFeatureData as Omit<Feature, 'id' | 'createdAt' | 'isValid' | 'isDirty'>);
     startEditingSketch(sketchId);

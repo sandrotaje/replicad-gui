@@ -1,13 +1,21 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useStore, planesEqual, getElementCenter, getPlaneOrientation } from '../store/useStore';
-import type {
-  Point,
-  SketchElement,
-  RectangleElement,
-  LineElement,
-  HLineElement,
-  VLineElement,
-  SketchTool,
+import { useFeatureStore } from '../store/useFeatureStore';
+import { extractSolverPrimitives } from '../utils/sketchToSolver';
+import FloatingConstraints from './FloatingConstraints';
+import {
+  ConstraintType,
+  type Point,
+  type SketchElement,
+  type RectangleElement,
+  type LineElement,
+  type HLineElement,
+  type VLineElement,
+  type SketchTool,
+  type Constraint,
+  type SolverPoint,
+  type SolverLine,
+  type SolverCircle,
 } from '../types';
 import {
   detectClosedProfiles,
@@ -50,10 +58,11 @@ export function Sketcher() {
   // Multi-step drawing state (for arc, spline)
   const [drawingState, setDrawingState] = useState<DrawingState | null>(null);
 
-  // Drag state for moving elements
+  // Drag state for moving elements or points
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState<Point | null>(null);
   const [dragElementId, setDragElementId] = useState<string | null>(null);
+  const [dragPointId, setDragPointId] = useState<string | null>(null); // e.g., "elementId_start" or "elementId_end"
 
   // Dimension editing state
   const [dimensionEdit, setDimensionEdit] = useState<DimensionEdit | null>(null);
@@ -73,6 +82,21 @@ export function Sketcher() {
   const sketchPlane = useStore((state) => state.sketchPlane);
   const shapeData = useStore((state) => state.shapeData);
   const faceOutline = useStore((state) => state.faceOutline);
+
+  // Constraint selection state from store
+  const selectedPointIds = useStore((state) => state.selectedPointIds);
+  const selectedLineIds = useStore((state) => state.selectedLineIds);
+  const selectedCircleIds = useStore((state) => state.selectedCircleIds);
+  const selectPoint = useStore((state) => state.selectPoint);
+  const selectLine = useStore((state) => state.selectLine);
+  const selectCircle = useStore((state) => state.selectCircle);
+  const clearConstraintSelection = useStore((state) => state.clearConstraintSelection);
+  const removeElement = useStore((state) => state.removeElement);
+
+  // Feature store access for constraint operations
+  const editingSketchId = useFeatureStore((state) => state.editingSketchId);
+  const addConstraint = useFeatureStore((state) => state.addConstraint);
+  const solveConstraints = useFeatureStore((state) => state.solveConstraints);
 
   // Get current plane's orientation
   const currentOrientation = useMemo(
@@ -98,6 +122,11 @@ export function Sketcher() {
     setDetectedClosedProfiles?.(detectedClosedProfiles);
   }, [detectedClosedProfiles, setDetectedClosedProfiles]);
 
+  // Extract solver primitives from current plane elements for point/line/circle hit detection
+  const solverPrimitives = useMemo(
+    () => extractSolverPrimitives(currentPlaneElements),
+    [currentPlaneElements]
+  );
   // Elements on parallel planes (same orientation, different plane - shown dimmed)
   // For standard planes: show elements from same orientation
   // For face planes: show elements from standard planes with same orientation
@@ -258,6 +287,87 @@ export function Sketcher() {
       }
     },
     [scale]
+  );
+
+  // Hit testing for solver points (within 8px threshold accounting for scale)
+  const hitTestPoint = useCallback(
+    (worldPoint: Point, solverPoint: SolverPoint): boolean => {
+      const threshold = 8 / scale; // 8 pixels in world units
+      const dx = worldPoint.x - solverPoint.x;
+      const dy = worldPoint.y - solverPoint.y;
+      return Math.sqrt(dx * dx + dy * dy) <= threshold;
+    },
+    [scale]
+  );
+
+  // Hit testing for solver lines (within 8px threshold)
+  const hitTestSolverLine = useCallback(
+    (worldPoint: Point, solverLine: SolverLine, points: SolverPoint[]): boolean => {
+      const threshold = 8 / scale;
+      const p1 = points.find((p) => p.id === solverLine.p1);
+      const p2 = points.find((p) => p.id === solverLine.p2);
+      if (!p1 || !p2) return false;
+
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const len2 = dx * dx + dy * dy;
+      if (len2 === 0) return Math.hypot(worldPoint.x - p1.x, worldPoint.y - p1.y) <= threshold;
+
+      let t = ((worldPoint.x - p1.x) * dx + (worldPoint.y - p1.y) * dy) / len2;
+      t = Math.max(0, Math.min(1, t));
+
+      const nearX = p1.x + t * dx;
+      const nearY = p1.y + t * dy;
+      return Math.hypot(worldPoint.x - nearX, worldPoint.y - nearY) <= threshold;
+    },
+    [scale]
+  );
+
+  // Hit testing for solver circles (within 8px of the circumference)
+  const hitTestSolverCircle = useCallback(
+    (worldPoint: Point, solverCircle: SolverCircle, points: SolverPoint[]): boolean => {
+      const threshold = 8 / scale;
+      const center = points.find((p) => p.id === solverCircle.center);
+      if (!center) return false;
+
+      const dist = Math.sqrt(
+        (worldPoint.x - center.x) ** 2 + (worldPoint.y - center.y) ** 2
+      );
+      // Check if near the circumference OR inside the circle
+      return Math.abs(dist - solverCircle.radius) <= threshold || dist <= solverCircle.radius;
+    },
+    [scale]
+  );
+
+  // Find what solver primitive was clicked (point, line, or circle)
+  const findClickedPrimitive = useCallback(
+    (worldPoint: Point): { type: 'point' | 'line' | 'circle'; id: string } | null => {
+      const { points, lines, circles } = solverPrimitives;
+
+      // Check points first (highest priority - smallest target)
+      for (const pt of points) {
+        if (hitTestPoint(worldPoint, pt)) {
+          return { type: 'point', id: pt.id };
+        }
+      }
+
+      // Check circles next (before lines to prioritize center points)
+      for (const circle of circles) {
+        if (hitTestSolverCircle(worldPoint, circle, points)) {
+          return { type: 'circle', id: circle.id };
+        }
+      }
+
+      // Check lines last
+      for (const line of lines) {
+        if (hitTestSolverLine(worldPoint, line, points)) {
+          return { type: 'line', id: line.id };
+        }
+      }
+
+      return null;
+    },
+    [solverPrimitives, hitTestPoint, hitTestSolverLine, hitTestSolverCircle]
   );
 
   // Draw a single element
@@ -642,6 +752,69 @@ export function Sketcher() {
     // Draw elements on current plane
     currentPlaneElements.forEach((elem) => drawElement(ctx, elem, false));
 
+    // Draw solver points for constraint selection
+    const { points: solverPoints } = solverPrimitives;
+    for (const pt of solverPoints) {
+      const screenPt = worldToScreen(pt.x, pt.y);
+      const isSelected = selectedPointIds.includes(pt.id);
+
+      // Draw point
+      ctx.beginPath();
+      if (isSelected) {
+        // Selected points: larger, blue
+        ctx.fillStyle = '#89b4fa';
+        ctx.arc(screenPt.x, screenPt.y, 6, 0, Math.PI * 2);
+      } else {
+        // Unselected points: smaller, gray
+        ctx.fillStyle = '#6c7086';
+        ctx.arc(screenPt.x, screenPt.y, 4, 0, Math.PI * 2);
+      }
+      ctx.fill();
+
+      // Draw a subtle outline for visibility
+      ctx.strokeStyle = isSelected ? '#1e66f5' : '#45475a';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    // Highlight selected lines
+    const { lines: solverLines } = solverPrimitives;
+    for (const line of solverLines) {
+      if (selectedLineIds.includes(line.id)) {
+        const p1 = solverPoints.find((p) => p.id === line.p1);
+        const p2 = solverPoints.find((p) => p.id === line.p2);
+        if (p1 && p2) {
+          const screen1 = worldToScreen(p1.x, p1.y);
+          const screen2 = worldToScreen(p2.x, p2.y);
+
+          ctx.beginPath();
+          ctx.strokeStyle = '#89b4fa';
+          ctx.lineWidth = 4;
+          ctx.moveTo(screen1.x, screen1.y);
+          ctx.lineTo(screen2.x, screen2.y);
+          ctx.stroke();
+        }
+      }
+    }
+
+    // Highlight selected circles
+    const { circles: solverCircles } = solverPrimitives;
+    for (const circle of solverCircles) {
+      if (selectedCircleIds.includes(circle.id)) {
+        const center = solverPoints.find((p) => p.id === circle.center);
+        if (center) {
+          const screenCenter = worldToScreen(center.x, center.y);
+          const screenRadius = circle.radius * scale;
+
+          ctx.beginPath();
+          ctx.strokeStyle = '#89b4fa';
+          ctx.lineWidth = 4;
+          ctx.arc(screenCenter.x, screenCenter.y, screenRadius, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
+    }
+
     // Draw preview for current drawing operation
     if (isDrawing && startPoint && currentPoint) {
       ctx.fillStyle = 'rgba(250, 179, 135, 0.3)';
@@ -865,6 +1038,10 @@ export function Sketcher() {
     currentTool,
     drawElement,
     sketchPlane,
+    solverPrimitives,
+    selectedPointIds,
+    selectedLineIds,
+    selectedCircleIds,
   ]);
 
   // Canvas resize
@@ -907,21 +1084,78 @@ export function Sketcher() {
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const point = screenToWorld(e.clientX, e.clientY);
 
+    // Debug logging for constraint selection
+    console.log('[Sketcher] MouseDown:', {
+      currentTool,
+      worldPoint: point,
+      solverPrimitives: {
+        pointCount: solverPrimitives.points.length,
+        lineCount: solverPrimitives.lines.length,
+        circleCount: solverPrimitives.circles.length,
+      },
+      currentPlaneElementsCount: currentPlaneElements.length,
+    });
+
     if (currentTool === 'select') {
-      // Check if clicking on a selected element for dragging
+      // Check for constraint primitive hit (point, line, circle)
+      const clickedPrimitive = findClickedPrimitive(point);
+      console.log('[Sketcher] Clicked primitive:', clickedPrimitive);
+
+      // Check if there's an element under the click
       const clickedElement = currentPlaneElements.find((elem) => hitTestElement(point, elem));
 
+      // SHIFT+click: Select primitives for constraints
+      if (e.shiftKey && clickedPrimitive) {
+        // Handle constraint primitive selection with shift key
+        if (clickedPrimitive.type === 'point') {
+          selectPoint(clickedPrimitive.id, true);
+        } else if (clickedPrimitive.type === 'line') {
+          selectLine(clickedPrimitive.id, true);
+        } else if (clickedPrimitive.type === 'circle') {
+          selectCircle(clickedPrimitive.id, true);
+        }
+        return;
+      }
+
+      // Normal click on element
       if (clickedElement) {
         if (clickedElement.selected) {
-          // Start dragging
-          setIsDragging(true);
-          setDragStart(point);
-          setDragElementId(clickedElement.id);
+          // Already selected - check if clicking on a specific point to drag it
+          if (clickedPrimitive && clickedPrimitive.type === 'point') {
+            // Dragging a specific point (changes shape)
+            setIsDragging(true);
+            setDragStart(point);
+            setDragElementId(clickedElement.id);
+            setDragPointId(clickedPrimitive.id); // e.g., "elementId_start"
+            clearConstraintSelection();
+          } else {
+            // Dragging the whole element (preserves shape)
+            setIsDragging(true);
+            setDragStart(point);
+            setDragElementId(clickedElement.id);
+            setDragPointId(null);
+            clearConstraintSelection();
+          }
         } else {
-          selectElement(clickedElement.id, e.shiftKey);
+          // Not selected - select it and also select its primitive for constraints
+          selectElement(clickedElement.id, false);
+          clearConstraintSelection();
+
+          // Also select the clicked primitive for potential constraint operations
+          if (clickedPrimitive) {
+            if (clickedPrimitive.type === 'point') {
+              selectPoint(clickedPrimitive.id, false);
+            } else if (clickedPrimitive.type === 'line') {
+              selectLine(clickedPrimitive.id, false);
+            } else if (clickedPrimitive.type === 'circle') {
+              selectCircle(clickedPrimitive.id, false);
+            }
+          }
         }
       } else {
+        // Clicked on empty space
         deselectAll();
+        clearConstraintSelection();
       }
     } else if (currentTool === 'arc') {
       // Multi-step arc drawing
@@ -989,13 +1223,77 @@ export function Sketcher() {
     const point = screenToWorld(e.clientX, e.clientY);
 
     if (isDragging && dragStart && dragElementId) {
-      // Move the element
-      const delta = {
-        x: point.x - dragStart.x,
-        y: point.y - dragStart.y,
-      };
-      moveElement(dragElementId, delta);
-      setDragStart(point);
+      if (dragPointId) {
+        // Dragging a specific point - update just that point
+        const element = elements.find(e => e.id === dragElementId);
+        if (element) {
+          // Parse point ID to get the role (e.g., "elementId_start" -> "start")
+          const role = dragPointId.split('_').pop();
+
+          if (element.type === 'line') {
+            if (role === 'start') {
+              updateElement(dragElementId, { start: { x: point.x, y: point.y } });
+            } else if (role === 'end') {
+              updateElement(dragElementId, { end: { x: point.x, y: point.y } });
+            }
+          } else if (element.type === 'rectangle') {
+            const rect = element as RectangleElement;
+            // For rectangles, dragging corners adjusts the bounds
+            if (role === 'start' || role === 'corner0') {
+              updateElement(dragElementId, {
+                start: { x: Math.min(point.x, rect.end.x), y: Math.min(point.y, rect.end.y) },
+                end: { x: Math.max(point.x, rect.end.x), y: Math.max(point.y, rect.end.y) }
+              });
+            } else if (role === 'end' || role === 'corner2') {
+              updateElement(dragElementId, {
+                start: { x: Math.min(rect.start.x, point.x), y: Math.min(rect.start.y, point.y) },
+                end: { x: Math.max(rect.start.x, point.x), y: Math.max(rect.start.y, point.y) }
+              });
+            }
+          } else if (element.type === 'circle') {
+            // For circles, dragging center moves it
+            updateElement(dragElementId, { center: { x: point.x, y: point.y } });
+          } else if (element.type === 'hline') {
+            const hline = element as HLineElement;
+            if (role === 'start') {
+              // Moving start point changes position and length
+              const endX = hline.start.x + hline.length;
+              updateElement(dragElementId, {
+                start: { x: point.x, y: point.y },
+                length: endX - point.x
+              });
+            } else if (role === 'end') {
+              // Moving end point changes length
+              updateElement(dragElementId, { length: point.x - hline.start.x });
+            }
+          } else if (element.type === 'vline') {
+            const vline = element as VLineElement;
+            if (role === 'start') {
+              const endY = vline.start.y + vline.length;
+              updateElement(dragElementId, {
+                start: { x: point.x, y: point.y },
+                length: endY - point.y
+              });
+            } else if (role === 'end') {
+              updateElement(dragElementId, { length: point.y - vline.start.y });
+            }
+          }
+
+          // Solve constraints in real-time during point drag
+          if (editingSketchId) {
+            solveConstraints(editingSketchId);
+          }
+        }
+        // Don't update dragStart for point dragging - we use absolute position
+      } else {
+        // Move the whole element (preserving shape)
+        const delta = {
+          x: point.x - dragStart.x,
+          y: point.y - dragStart.y,
+        };
+        moveElement(dragElementId, delta);
+        setDragStart(point);
+      }
     } else if (isDrawing) {
       setCurrentPoint(point);
     } else if (drawingState) {
@@ -1006,9 +1304,14 @@ export function Sketcher() {
   // Mouse up handler
   const handleMouseUp = () => {
     if (isDragging) {
+      // After dragging, re-solve constraints to maintain them
+      if (editingSketchId) {
+        solveConstraints(editingSketchId);
+      }
       setIsDragging(false);
       setDragStart(null);
       setDragElementId(null);
+      setDragPointId(null);
       return;
     }
 
@@ -1597,6 +1900,180 @@ export function Sketcher() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [drawingState, isDrawing, dimensionEdit]);
 
+  // Calculate initial value for constraints that need input
+  const calculateInitialConstraintValue = useCallback(
+    (type: ConstraintType): number => {
+      const { points, lines, circles } = solverPrimitives;
+
+      switch (type) {
+        case ConstraintType.DISTANCE: {
+          // Distance between two points
+          if (selectedPointIds.length === 2) {
+            const p1 = points.find((p) => p.id === selectedPointIds[0]);
+            const p2 = points.find((p) => p.id === selectedPointIds[1]);
+            if (p1 && p2) {
+              return Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2);
+            }
+          }
+          // Length of a line
+          if (selectedLineIds.length === 1) {
+            const line = lines.find((l) => l.id === selectedLineIds[0]);
+            if (line) {
+              const p1 = points.find((p) => p.id === line.p1);
+              const p2 = points.find((p) => p.id === line.p2);
+              if (p1 && p2) {
+                return Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2);
+              }
+            }
+          }
+          return 10;
+        }
+        case ConstraintType.RADIUS: {
+          if (selectedCircleIds.length === 1) {
+            const circle = circles.find((c) => c.id === selectedCircleIds[0]);
+            if (circle) {
+              return circle.radius;
+            }
+          }
+          return 10;
+        }
+        case ConstraintType.ANGLE: {
+          if (selectedLineIds.length === 1) {
+            const line = lines.find((l) => l.id === selectedLineIds[0]);
+            if (line) {
+              const p1 = points.find((p) => p.id === line.p1);
+              const p2 = points.find((p) => p.id === line.p2);
+              if (p1 && p2) {
+                return Math.atan2(p2.y - p1.y, p2.x - p1.x) * (180 / Math.PI);
+              }
+            }
+          }
+          if (selectedLineIds.length === 2) {
+            // Angle between two lines
+            const l1 = lines.find((l) => l.id === selectedLineIds[0]);
+            const l2 = lines.find((l) => l.id === selectedLineIds[1]);
+            if (l1 && l2) {
+              const p1a = points.find((p) => p.id === l1.p1);
+              const p1b = points.find((p) => p.id === l1.p2);
+              const p2a = points.find((p) => p.id === l2.p1);
+              const p2b = points.find((p) => p.id === l2.p2);
+              if (p1a && p1b && p2a && p2b) {
+                const v1x = p1b.x - p1a.x;
+                const v1y = p1b.y - p1a.y;
+                const v2x = p2b.x - p2a.x;
+                const v2y = p2b.y - p2a.y;
+                const dot = v1x * v2x + v1y * v2y;
+                const mag1 = Math.sqrt(v1x * v1x + v1y * v1y);
+                const mag2 = Math.sqrt(v2x * v2x + v2y * v2y);
+                if (mag1 > 0 && mag2 > 0) {
+                  return Math.acos(Math.max(-1, Math.min(1, dot / (mag1 * mag2)))) * (180 / Math.PI);
+                }
+              }
+            }
+          }
+          return 0;
+        }
+        default:
+          return 0;
+      }
+    },
+    [solverPrimitives, selectedPointIds, selectedLineIds, selectedCircleIds]
+  );
+
+  // Handle applying a constraint
+  const handleApplyConstraint = useCallback(
+    (type: ConstraintType, needsInput: boolean) => {
+      // Only allow constraint application when editing a sketch
+      if (!editingSketchId) {
+        console.warn('Cannot apply constraint: not editing a sketch');
+        return;
+      }
+
+      let value: number | undefined;
+
+      if (needsInput) {
+        const initialValue = calculateInitialConstraintValue(type);
+        const input = prompt('Enter value:', initialValue.toFixed(2));
+        if (input === null) return;
+        value = parseFloat(input);
+        if (isNaN(value)) {
+          console.warn('Invalid value entered');
+          return;
+        }
+      }
+
+      // Create the constraint object
+      const constraint: Omit<Constraint, 'id'> = {
+        type,
+        points: [...selectedPointIds],
+        lines: [...selectedLineIds],
+        circles: [...selectedCircleIds],
+        value,
+      };
+
+      // Add constraint to the feature store
+      addConstraint(editingSketchId, constraint);
+
+      // Solve constraints
+      solveConstraints(editingSketchId);
+
+      // Clear selection
+      clearConstraintSelection();
+    },
+    [
+      editingSketchId,
+      selectedPointIds,
+      selectedLineIds,
+      selectedCircleIds,
+      addConstraint,
+      solveConstraints,
+      clearConstraintSelection,
+      calculateInitialConstraintValue,
+    ]
+  );
+
+  // Handle deleting selected primitives
+  const handleDeleteSelected = useCallback(() => {
+    // Find elements that contain the selected primitives and delete them
+    const elementsToDelete = new Set<string>();
+
+    // For selected points, find their parent elements
+    for (const pointId of selectedPointIds) {
+      // Point ID format is "{elementId}_{role}"
+      const elementId = pointId.split('_').slice(0, -1).join('_');
+      if (elementId) {
+        elementsToDelete.add(elementId);
+      }
+    }
+
+    // For selected lines, find their parent elements
+    for (const lineId of selectedLineIds) {
+      // Line ID format is "{elementId}_line" or "{elementId}_edge{n}_line"
+      const parts = lineId.replace('_line', '').split('_edge');
+      const elementId = parts[0];
+      if (elementId) {
+        elementsToDelete.add(elementId);
+      }
+    }
+
+    // For selected circles, find their parent elements
+    for (const circleId of selectedCircleIds) {
+      // Circle ID format is "{elementId}_circle"
+      const elementId = circleId.replace('_circle', '');
+      if (elementId) {
+        elementsToDelete.add(elementId);
+      }
+    }
+
+    // Delete the elements
+    Array.from(elementsToDelete).forEach((elementId) => {
+      removeElement(elementId);
+    });
+
+    // Clear selection
+    clearConstraintSelection();
+  }, [selectedPointIds, selectedLineIds, selectedCircleIds, removeElement, clearConstraintSelection]);
+
   // Cursor style based on tool
   const getCursor = () => {
     if (currentTool === 'select') {
@@ -1716,6 +2193,23 @@ export function Sketcher() {
           </button>
         </div>
       )}
+
+      {/* Floating constraints panel - shown when primitives are selected */}
+      {/* Debug: show selection state */}
+      {(selectedPointIds.length > 0 || selectedLineIds.length > 0 || selectedCircleIds.length > 0) && (
+        <div style={{ position: 'absolute', top: 10, left: 10, background: 'rgba(0,0,0,0.8)', color: 'white', padding: 8, fontSize: 12, zIndex: 1000 }}>
+          Points: {selectedPointIds.join(', ') || 'none'}<br/>
+          Lines: {selectedLineIds.join(', ') || 'none'}<br/>
+          Circles: {selectedCircleIds.join(', ') || 'none'}
+        </div>
+      )}
+      <FloatingConstraints
+        selectedPointIds={selectedPointIds}
+        selectedLineIds={selectedLineIds}
+        selectedCircleIds={selectedCircleIds}
+        onApplyConstraint={handleApplyConstraint}
+        onDelete={handleDeleteSelected}
+      />
     </div>
   );
 }

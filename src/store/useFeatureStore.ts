@@ -9,8 +9,11 @@ import type {
   FeatureType,
   SketchElement,
   ShapeData,
+  Constraint,
 } from '../types';
 import { useStore as useLegacyStore } from './useStore';
+import { extractSolverPrimitives, applySolvedPositions } from '../utils/sketchToSolver';
+import { ConstraintSolver } from '../utils/constraintSolver';
 
 /**
  * Clear the legacy store's 3D data (shapeData, meshData)
@@ -97,6 +100,12 @@ interface FeatureStoreActions {
   addSketchElement: (featureId: string, element: SketchElement) => void;
   updateSketchElement: (featureId: string, elementId: string, updates: Partial<SketchElement>) => void;
   deleteSketchElement: (featureId: string, elementId: string) => void;
+
+  // Constraint management
+  addConstraint: (sketchId: string, constraint: Omit<Constraint, 'id'>) => void;
+  removeConstraint: (sketchId: string, constraintId: string) => void;
+  updateConstraintValue: (sketchId: string, constraintId: string, value: number) => void;
+  solveConstraints: (sketchId: string) => void;
 
   // Active/editing state
   setActiveFeature: (id: string | null) => void;
@@ -1072,6 +1081,248 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
     }
 
     return `${baseName} ${maxNum + 1}`;
+  },
+
+  // ============ CONSTRAINT MANAGEMENT ============
+
+  addConstraint: (sketchId, constraintData) => {
+    const state = get();
+    const feature = state.featureById.get(sketchId);
+
+    if (!feature || feature.type !== 'sketch') {
+      console.warn(`Sketch feature not found: ${sketchId}`);
+      return;
+    }
+
+    const sketchFeature = feature as SketchFeature;
+    const constraintId = crypto.randomUUID();
+    const newConstraint: Constraint = {
+      ...constraintData,
+      id: constraintId,
+    };
+
+    const newConstraints = [...sketchFeature.constraints, newConstraint];
+
+    set((state) => {
+      const updatedFeature: SketchFeature = {
+        ...sketchFeature,
+        constraints: newConstraints,
+        isDirty: true,
+      };
+
+      const newFeatures = state.features.map((f) =>
+        f.id === sketchId ? updatedFeature : f
+      );
+
+      const newFeatureById = new Map(state.featureById);
+      newFeatureById.set(sketchId, updatedFeature);
+
+      // Create command for undo
+      const command = createCommand('updateFeature', {
+        before: cloneFeature(sketchFeature),
+        after: cloneFeature(updatedFeature),
+        featureId: sketchId,
+      });
+
+      const newHistory: HistoryState = {
+        ...state.history,
+        undoStack: [...state.history.undoStack, command].slice(-state.history.maxHistorySize),
+        redoStack: [],
+      };
+
+      return {
+        features: newFeatures,
+        featureById: newFeatureById,
+        history: newHistory,
+      };
+    });
+  },
+
+  removeConstraint: (sketchId, constraintId) => {
+    const state = get();
+    const feature = state.featureById.get(sketchId);
+
+    if (!feature || feature.type !== 'sketch') {
+      console.warn(`Sketch feature not found: ${sketchId}`);
+      return;
+    }
+
+    const sketchFeature = feature as SketchFeature;
+    const newConstraints = sketchFeature.constraints.filter((c) => c.id !== constraintId);
+
+    set((state) => {
+      const updatedFeature: SketchFeature = {
+        ...sketchFeature,
+        constraints: newConstraints,
+        isDirty: true,
+      };
+
+      const newFeatures = state.features.map((f) =>
+        f.id === sketchId ? updatedFeature : f
+      );
+
+      const newFeatureById = new Map(state.featureById);
+      newFeatureById.set(sketchId, updatedFeature);
+
+      // Create command for undo
+      const command = createCommand('updateFeature', {
+        before: cloneFeature(sketchFeature),
+        after: cloneFeature(updatedFeature),
+        featureId: sketchId,
+      });
+
+      const newHistory: HistoryState = {
+        ...state.history,
+        undoStack: [...state.history.undoStack, command].slice(-state.history.maxHistorySize),
+        redoStack: [],
+      };
+
+      return {
+        features: newFeatures,
+        featureById: newFeatureById,
+        history: newHistory,
+      };
+    });
+  },
+
+  updateConstraintValue: (sketchId, constraintId, value) => {
+    const state = get();
+    const feature = state.featureById.get(sketchId);
+
+    if (!feature || feature.type !== 'sketch') {
+      console.warn(`Sketch feature not found: ${sketchId}`);
+      return;
+    }
+
+    const sketchFeature = feature as SketchFeature;
+    const newConstraints = sketchFeature.constraints.map((c) =>
+      c.id === constraintId ? { ...c, value } : c
+    );
+
+    set((state) => {
+      const updatedFeature: SketchFeature = {
+        ...sketchFeature,
+        constraints: newConstraints,
+        isDirty: true,
+      };
+
+      const newFeatures = state.features.map((f) =>
+        f.id === sketchId ? updatedFeature : f
+      );
+
+      const newFeatureById = new Map(state.featureById);
+      newFeatureById.set(sketchId, updatedFeature);
+
+      // Create command for undo
+      const command = createCommand('updateFeature', {
+        before: cloneFeature(sketchFeature),
+        after: cloneFeature(updatedFeature),
+        featureId: sketchId,
+      });
+
+      const newHistory: HistoryState = {
+        ...state.history,
+        undoStack: [...state.history.undoStack, command].slice(-state.history.maxHistorySize),
+        redoStack: [],
+      };
+
+      return {
+        features: newFeatures,
+        featureById: newFeatureById,
+        history: newHistory,
+      };
+    });
+  },
+
+  solveConstraints: (sketchId) => {
+    const state = get();
+    const feature = state.featureById.get(sketchId);
+
+    if (!feature || feature.type !== 'sketch') {
+      console.warn(`Sketch feature not found: ${sketchId}`);
+      return;
+    }
+
+    const sketchFeature = feature as SketchFeature;
+
+    try {
+      // Step 1: Extract solver primitives from sketch elements
+      const { points, lines, circles } = extractSolverPrimitives(sketchFeature.elements);
+
+      // Step 2: Solve constraints
+      const solverResult = ConstraintSolver.solve(
+        points,
+        sketchFeature.constraints,
+        lines,
+        circles
+      );
+
+      // Step 3: Apply solved positions back to elements
+      const updatedElements = applySolvedPositions(
+        sketchFeature.elements,
+        solverResult.points,
+        solverResult.circles
+      );
+
+      // Step 4: Update sketch with solved elements
+      set((state) => {
+        const updatedFeature: SketchFeature = {
+          ...sketchFeature,
+          elements: updatedElements,
+          isDirty: true,
+        };
+
+        const newFeatures = state.features.map((f) =>
+          f.id === sketchId ? updatedFeature : f
+        );
+
+        const newFeatureById = new Map(state.featureById);
+        newFeatureById.set(sketchId, updatedFeature);
+
+        // Create command for undo
+        const command = createCommand('updateFeature', {
+          before: cloneFeature(sketchFeature),
+          after: cloneFeature(updatedFeature),
+          featureId: sketchId,
+        });
+
+        const newHistory: HistoryState = {
+          ...state.history,
+          undoStack: [...state.history.undoStack, command].slice(-state.history.maxHistorySize),
+          redoStack: [],
+        };
+
+        return {
+          features: newFeatures,
+          featureById: newFeatureById,
+          history: newHistory,
+        };
+      });
+
+      console.log(`[Feature Store] Constraints solved for sketch: ${sketchId}`);
+    } catch (error) {
+      console.error('[Feature Store] Failed to solve constraints:', error);
+      // Mark feature as invalid
+      set((state) => {
+        const invalidFeature: SketchFeature = {
+          ...sketchFeature,
+          isValid: false,
+          errorMessage: `Constraint solver error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        };
+
+        const newFeatures = state.features.map((f) =>
+          f.id === sketchId ? invalidFeature : f
+        );
+
+        const newFeatureById = new Map(state.featureById);
+        newFeatureById.set(sketchId, invalidFeature);
+
+        return {
+          features: newFeatures,
+          featureById: newFeatureById,
+        };
+      });
+    }
   },
 
   // ============ CACHE MANAGEMENT ============

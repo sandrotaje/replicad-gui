@@ -49,6 +49,11 @@ interface AppState {
   hoveredFaceIndex: number | null;
   hoveredEdgeIndex: number | null;
 
+  // Constraint selection state
+  selectedPointIds: string[];
+  selectedLineIds: string[];
+  selectedCircleIds: string[];
+
   // Extrusion state (per-plane)
   planeDepths: Map<string, number>; // Depth for each plane
   defaultDepth: number; // Default depth for new planes
@@ -105,6 +110,12 @@ interface AppState {
 
   // Closed profile detection
   setDetectedClosedProfiles: (profiles: ClosedProfileGroup[]) => void;
+
+  // Constraint selection actions
+  selectPoint: (id: string, multiSelect?: boolean) => void;
+  selectLine: (id: string, multiSelect?: boolean) => void;
+  selectCircle: (id: string, multiSelect?: boolean) => void;
+  clearConstraintSelection: () => void;
 }
 
 // Helper to get a unique key for a plane (for grouping)
@@ -440,6 +451,11 @@ function main() {
   selectedEdgeIndices: new Set(),
   hoveredFaceIndex: null,
   hoveredEdgeIndex: null,
+
+  // Constraint selection state
+  selectedPointIds: [],
+  selectedLineIds: [],
+  selectedCircleIds: [],
 
   planeDepths: new Map<string, number>(),
   defaultDepth: 10,
@@ -815,6 +831,59 @@ function main() {
 
   // Closed profile detection
   setDetectedClosedProfiles: (profiles) => set({ detectedClosedProfiles: profiles }),
+
+  // Constraint selection actions
+  selectPoint: (id, multiSelect = false) =>
+    set((state) => {
+      if (multiSelect) {
+        // Add to selection or remove if already selected
+        const alreadySelected = state.selectedPointIds.includes(id);
+        const newSelectedPointIds = alreadySelected
+          ? state.selectedPointIds.filter((pId) => pId !== id)
+          : [...state.selectedPointIds, id];
+        return { selectedPointIds: newSelectedPointIds };
+      } else {
+        // Single select - replace selection
+        return { selectedPointIds: [id] };
+      }
+    }),
+
+  selectLine: (id, multiSelect = false) =>
+    set((state) => {
+      if (multiSelect) {
+        // Add to selection or remove if already selected
+        const alreadySelected = state.selectedLineIds.includes(id);
+        const newSelectedLineIds = alreadySelected
+          ? state.selectedLineIds.filter((lId) => lId !== id)
+          : [...state.selectedLineIds, id];
+        return { selectedLineIds: newSelectedLineIds };
+      } else {
+        // Single select - replace selection
+        return { selectedLineIds: [id] };
+      }
+    }),
+
+  selectCircle: (id, multiSelect = false) =>
+    set((state) => {
+      if (multiSelect) {
+        // Add to selection or remove if already selected
+        const alreadySelected = state.selectedCircleIds.includes(id);
+        const newSelectedCircleIds = alreadySelected
+          ? state.selectedCircleIds.filter((cId) => cId !== id)
+          : [...state.selectedCircleIds, id];
+        return { selectedCircleIds: newSelectedCircleIds };
+      } else {
+        // Single select - replace selection
+        return { selectedCircleIds: [id] };
+      }
+    }),
+
+  clearConstraintSelection: () =>
+    set({
+      selectedPointIds: [],
+      selectedLineIds: [],
+      selectedCircleIds: [],
+    }),
 }));
 
 // Helper to get the orientation of a plane (which standard plane it's parallel to)
