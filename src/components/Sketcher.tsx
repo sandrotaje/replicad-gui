@@ -1121,6 +1121,12 @@ export function Sketcher() {
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const point = screenToWorld(e.clientX, e.clientY);
 
+    // Prevent drawing when not editing a sketch (selection is still allowed)
+    if (!editingSketchId && currentTool !== 'select') {
+      console.log('[Sketcher] Drawing disabled - not editing a sketch');
+      return;
+    }
+
     // Debug logging for constraint selection
     console.log('[Sketcher] MouseDown:', {
       currentTool,
@@ -1722,6 +1728,11 @@ export function Sketcher() {
       }
       lastTapRef.current = now;
 
+      // Prevent drawing when not editing a sketch (selection is still allowed)
+      if (!editingSketchId && currentTool !== 'select') {
+        return;
+      }
+
       // Same logic as mouse down
       if (currentTool === 'select') {
         const clickedElement = currentPlaneElements.find((elem) => hitTestElement(point, elem));
@@ -2192,6 +2203,33 @@ export function Sketcher() {
               outline: 'none',
             }}
           />
+        </div>
+      )}
+
+      {/* No sketch editing overlay */}
+      {!editingSketchId && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            padding: '16px 24px',
+            backgroundColor: 'rgba(30, 30, 46, 0.95)',
+            borderRadius: '8px',
+            border: '1px solid #45475a',
+            color: '#cdd6f4',
+            fontSize: '14px',
+            textAlign: 'center',
+            pointerEvents: 'none',
+          }}
+        >
+          <div style={{ marginBottom: '8px', fontWeight: 600 }}>
+            No sketch selected
+          </div>
+          <div style={{ fontSize: '12px', color: '#a6adc8' }}>
+            Create a new sketch or edit an existing one to start drawing
+          </div>
         </div>
       )}
 
