@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import type { ExtrusionFeature, CutFeature } from '../types';
+import type { ExtrusionFeature, CutFeature, ShellFeature } from '../types';
 
-type EditableFeature = ExtrusionFeature | CutFeature;
+type EditableFeature = ExtrusionFeature | CutFeature | ShellFeature;
 
 interface FeatureEditDialogProps {
   feature: EditableFeature;
@@ -14,23 +14,38 @@ export const FeatureEditDialog: React.FC<FeatureEditDialogProps> = ({
   onSave,
   onCancel,
 }) => {
-  const [depth, setDepth] = useState<number | 'through'>(feature.depth);
-  const [direction, setDirection] = useState<'normal' | 'reverse' | 'both'>(feature.direction);
+  const [depth, setDepth] = useState<number | 'through'>(
+    feature.type === 'shell' ? 0 : feature.depth
+  );
+  const [direction, setDirection] = useState<'normal' | 'reverse' | 'both'>(
+    feature.type === 'shell' ? 'normal' : feature.direction
+  );
   const [operation, setOperation] = useState<'new' | 'fuse' | 'cut'>(
     feature.type === 'extrusion' ? feature.operation : 'cut'
+  );
+  const [thickness, setThickness] = useState<number>(
+    feature.type === 'shell' ? feature.thickness : 1
   );
 
   // Reset form when feature changes
   useEffect(() => {
-    setDepth(feature.depth);
-    setDirection(feature.direction);
-    if (feature.type === 'extrusion') {
-      setOperation(feature.operation);
+    if (feature.type === 'shell') {
+      setThickness(feature.thickness);
+    } else {
+      setDepth(feature.depth);
+      setDirection(feature.direction);
+      if (feature.type === 'extrusion') {
+        setOperation(feature.operation);
+      }
     }
   }, [feature]);
 
   const handleSave = () => {
-    const updates: Partial<EditableFeature> = {
+    if (feature.type === 'shell') {
+      onSave({ thickness } as Partial<ShellFeature>);
+      return;
+    }
+    const updates: Partial<ExtrusionFeature | CutFeature> = {
       depth,
       direction,
     };
@@ -132,59 +147,87 @@ export const FeatureEditDialog: React.FC<FeatureEditDialogProps> = ({
     transition: 'opacity 0.2s',
   });
 
+  const getIcon = () => {
+    switch (feature.type) {
+      case 'extrusion': return '⬆️';
+      case 'cut': return '✂️';
+      case 'shell': return '🥚';
+    }
+  };
+
   return (
     <div style={overlayStyle} onClick={onCancel}>
       <div style={dialogStyle} onClick={(e) => e.stopPropagation()}>
         <div style={headerStyle}>
-          <span>{feature.type === 'extrusion' ? '⬆️' : '✂️'}</span>
+          <span>{getIcon()}</span>
           <span>Edit {feature.name}</span>
         </div>
 
-        {/* Depth */}
-        <div style={fieldStyle}>
-          <label style={labelStyle}>
-            Depth {feature.type === 'cut' && '(or "through")'}
-          </label>
-          <input
-            type={typeof depth === 'number' ? 'number' : 'text'}
-            value={depth === 'through' ? 'through' : depth}
-            onChange={(e) => handleDepthChange(e.target.value)}
-            style={inputStyle}
-            min={0.1}
-            step={0.5}
-          />
-        </div>
-
-        {/* Direction */}
-        <div style={fieldStyle}>
-          <label style={labelStyle}>Direction</label>
-          <select
-            value={direction}
-            onChange={(e) => setDirection(e.target.value as 'normal' | 'reverse' | 'both')}
-            style={selectStyle}
-          >
-            <option value="normal">Normal (forward)</option>
-            <option value="reverse">Reverse (backward)</option>
-            {feature.type === 'cut' && (
-              <option value="both">Both directions</option>
-            )}
-          </select>
-        </div>
-
-        {/* Operation (extrusion only) */}
-        {feature.type === 'extrusion' && (
+        {feature.type === 'shell' ? (
+          /* Shell-specific fields */
           <div style={fieldStyle}>
-            <label style={labelStyle}>Operation</label>
-            <select
-              value={operation}
-              onChange={(e) => setOperation(e.target.value as 'new' | 'fuse' | 'cut')}
-              style={selectStyle}
-            >
-              <option value="new">New solid</option>
-              <option value="fuse">Fuse with existing</option>
-              <option value="cut">Cut from existing</option>
-            </select>
+            <label style={labelStyle}>Wall Thickness</label>
+            <input
+              type="number"
+              value={thickness}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value);
+                if (!isNaN(v) && v > 0) setThickness(v);
+              }}
+              style={inputStyle}
+              min={0.1}
+              step={0.5}
+            />
           </div>
+        ) : (
+          <>
+            {/* Depth */}
+            <div style={fieldStyle}>
+              <label style={labelStyle}>
+                Depth {feature.type === 'cut' && '(or "through")'}
+              </label>
+              <input
+                type={typeof depth === 'number' ? 'number' : 'text'}
+                value={depth === 'through' ? 'through' : depth}
+                onChange={(e) => handleDepthChange(e.target.value)}
+                style={inputStyle}
+                min={0.1}
+                step={0.5}
+              />
+            </div>
+
+            {/* Direction */}
+            <div style={fieldStyle}>
+              <label style={labelStyle}>Direction</label>
+              <select
+                value={direction}
+                onChange={(e) => setDirection(e.target.value as 'normal' | 'reverse' | 'both')}
+                style={selectStyle}
+              >
+                <option value="normal">Normal (forward)</option>
+                <option value="reverse">Reverse (backward)</option>
+                {feature.type === 'cut' && (
+                  <option value="both">Both directions</option>
+                )}
+              </select>
+            </div>
+
+            {/* Operation (extrusion only) */}
+            {feature.type === 'extrusion' && (
+              <div style={fieldStyle}>
+                <label style={labelStyle}>Operation</label>
+                <select
+                  value={operation}
+                  onChange={(e) => setOperation(e.target.value as 'new' | 'fuse' | 'cut')}
+                  style={selectStyle}
+                >
+                  <option value="new">New solid</option>
+                  <option value="fuse">Fuse with existing</option>
+                  <option value="cut">Cut from existing</option>
+                </select>
+              </div>
+            )}
+          </>
         )}
 
         {/* Buttons */}

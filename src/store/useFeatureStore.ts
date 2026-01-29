@@ -169,7 +169,8 @@ function getFeatureDependencies(feature: Feature): string[] {
 
     case 'chamfer':
     case 'fillet':
-      // Chamfer and fillet depend on their target feature
+    case 'shell':
+      // Chamfer, fillet, and shell depend on their target feature
       deps.push(feature.targetFeatureId);
       break;
   }
@@ -1062,6 +1063,7 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
       chamfer: 'Chamfer',
       fillet: 'Fillet',
       revolve: 'Revolve',
+      shell: 'Shell',
     };
 
     const baseName = typeNames[type] || type;

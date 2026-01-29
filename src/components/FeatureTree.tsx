@@ -9,6 +9,7 @@ import type {
   CutFeature,
   ChamferFeature,
   FilletFeature,
+  ShellFeature,
 } from '../types';
 
 // ============ PROJECT MENU COMPONENT ============
@@ -209,6 +210,8 @@ const FeatureIcon: React.FC<FeatureIconProps> = ({ type }) => {
       return <span style={iconStyle} title="Chamfer">📐</span>;
     case 'fillet':
       return <span style={iconStyle} title="Fillet">⭕</span>;
+    case 'shell':
+      return <span style={iconStyle} title="Shell">🥚</span>;
     default:
       // Future feature types can be added here
       return <span style={iconStyle}>•</span>;
@@ -299,6 +302,11 @@ const FeatureItem: React.FC<FeatureItemProps> = ({
       case 'fillet': {
         const fillet = feature as FilletFeature;
         return `Radius: ${fillet.radius}`;
+      }
+      case 'shell': {
+        const shell = feature as ShellFeature;
+        const facesRemoved = shell.faceIndices.length;
+        return `Thickness: ${shell.thickness}${facesRemoved > 0 ? `, ${facesRemoved} face${facesRemoved !== 1 ? 's' : ''} removed` : ''}`;
       }
       default:
         return '';
@@ -409,10 +417,10 @@ function calculateDepth(feature: Feature, allFeatures: Feature[]): number {
     return 0;
   }
 
-  // Chamfer and fillet depend on their target feature
+  // Chamfer, fillet, and shell depend on their target feature
   // They stay at the same level as their target (like extrusion stays at sketch level)
-  if (feature.type === 'chamfer' || feature.type === 'fillet') {
-    const targetId = (feature as ChamferFeature | FilletFeature).targetFeatureId;
+  if (feature.type === 'chamfer' || feature.type === 'fillet' || feature.type === 'shell') {
+    const targetId = (feature as ChamferFeature | FilletFeature | ShellFeature).targetFeatureId;
     const target = allFeatures.find((f) => f.id === targetId);
     if (target) {
       return calculateDepth(target, allFeatures);
@@ -501,7 +509,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
             <span>Edit Sketch</span>
           </div>
         )}
-        {(feature.type === 'extrusion' || feature.type === 'cut' || feature.type === 'chamfer' || feature.type === 'fillet') && onEditParameters && (
+        {(feature.type === 'extrusion' || feature.type === 'cut' || feature.type === 'chamfer' || feature.type === 'fillet' || feature.type === 'shell') && onEditParameters && (
           <div
             style={menuItemStyle}
             onClick={() => {
@@ -563,7 +571,7 @@ export const FeatureTree: React.FC = () => {
   } | null>(null);
 
   // Edit dialog state
-  const [editingFeature, setEditingFeature] = useState<ExtrusionFeature | CutFeature | null>(null);
+  const [editingFeature, setEditingFeature] = useState<ExtrusionFeature | CutFeature | ShellFeature | null>(null);
 
   // Bevel edit dialog state
   const [editingBevelFeature, setEditingBevelFeature] = useState<ChamferFeature | FilletFeature | null>(null);
@@ -586,8 +594,8 @@ export const FeatureTree: React.FC = () => {
     (feature: Feature) => {
       if (feature.type === 'sketch') {
         startEditingSketch(feature.id);
-      } else if (feature.type === 'extrusion' || feature.type === 'cut') {
-        setEditingFeature(feature as ExtrusionFeature | CutFeature);
+      } else if (feature.type === 'extrusion' || feature.type === 'cut' || feature.type === 'shell') {
+        setEditingFeature(feature as ExtrusionFeature | CutFeature | ShellFeature);
       } else if (feature.type === 'chamfer' || feature.type === 'fillet') {
         setEditingBevelFeature(feature as ChamferFeature | FilletFeature);
       }
@@ -597,8 +605,8 @@ export const FeatureTree: React.FC = () => {
 
   const handleEditParameters = useCallback(() => {
     if (contextMenu) {
-      if (contextMenu.feature.type === 'extrusion' || contextMenu.feature.type === 'cut') {
-        setEditingFeature(contextMenu.feature as ExtrusionFeature | CutFeature);
+      if (contextMenu.feature.type === 'extrusion' || contextMenu.feature.type === 'cut' || contextMenu.feature.type === 'shell') {
+        setEditingFeature(contextMenu.feature as ExtrusionFeature | CutFeature | ShellFeature);
       } else if (contextMenu.feature.type === 'chamfer' || contextMenu.feature.type === 'fillet') {
         setEditingBevelFeature(contextMenu.feature as ChamferFeature | FilletFeature);
       }
@@ -606,7 +614,7 @@ export const FeatureTree: React.FC = () => {
   }, [contextMenu]);
 
   const handleSaveFeatureEdit = useCallback(
-    (updates: Partial<ExtrusionFeature | CutFeature>) => {
+    (updates: Partial<ExtrusionFeature | CutFeature | ShellFeature>) => {
       if (editingFeature) {
         updateFeature(editingFeature.id, updates);
         setEditingFeature(null);

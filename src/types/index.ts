@@ -245,7 +245,8 @@ export type FeatureType =
   | 'cut'
   | 'chamfer'
   | 'fillet'
-  | 'revolve';
+  | 'revolve'
+  | 'shell';
 
 export interface FeatureBase {
   id: string;
@@ -319,13 +320,22 @@ export interface FilletFeature extends FeatureBase {
   radius: number;                  // Fillet radius
 }
 
+// Shell Feature
+export interface ShellFeature extends FeatureBase {
+  type: 'shell';
+  targetFeatureId: string;         // Which feature to shell
+  thickness: number;               // Wall thickness
+  faceIndices: number[];           // Faces to remove (open)
+}
+
 // Union of all feature types
 export type Feature =
   | SketchFeature
   | ExtrusionFeature
   | CutFeature
   | ChamferFeature
-  | FilletFeature;
+  | FilletFeature
+  | ShellFeature;
 
 // ============ HISTORY/COMMAND TYPES ============
 

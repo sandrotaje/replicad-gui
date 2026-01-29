@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useStore } from '../store/useStore';
 import { useFeatureStore } from '../store/useFeatureStore';
-import type { SketchFeature, ExtrusionFeature, CutFeature, ChamferFeature, FilletFeature, Feature } from '../types';
+import type { SketchFeature, ExtrusionFeature, CutFeature, ChamferFeature, FilletFeature, ShellFeature, Feature } from '../types';
 import { exportToSTL } from '../utils/stlExporter';
 import { DepthPromptDialog, type OperationDirection } from './DepthPromptDialog';
 import { BevelDialog, type BevelType } from './BevelDialog';
@@ -283,6 +283,36 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
     }
   };
 
+  // Check if there's existing solid geometry (for shell)
+  const hasSolidGeometry = features.some(f => f.type === 'extrusion' || f.type === 'cut');
+
+  // Find the last 3D-generating feature for shell target
+  const lastSolidFeature = (() => {
+    const solidFeatures = features.filter(f =>
+      f.type === 'extrusion' || f.type === 'cut' || f.type === 'chamfer' || f.type === 'fillet' || f.type === 'shell'
+    );
+    return solidFeatures[solidFeatures.length - 1];
+  })();
+
+  const handleShell = () => {
+    if (!lastSolidFeature) return;
+
+    const faceIndices = Array.from(selectedFaceIndices);
+
+    const shellFeatureData: Omit<ShellFeature, 'id' | 'createdAt' | 'isValid' | 'isDirty'> = {
+      type: 'shell',
+      name: generateUniqueName('shell'),
+      targetFeatureId: lastSolidFeature.id,
+      thickness: 1,
+      faceIndices,
+      isCollapsed: false,
+    };
+    addFeature(shellFeatureData as Omit<Feature, 'id' | 'createdAt' | 'isValid' | 'isDirty'>);
+    if (isMobile && setToolsOpen) {
+      setToolsOpen(false);
+    }
+  };
+
   const handleExportSTL = () => {
     if (!shapeData) return;
     exportToSTL(shapeData, 'model.stl');
@@ -333,6 +363,15 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
             title="Create a sketch on the selected face"
           >
             Sketch on Face
+          </button>
+        )}
+        {!editingSketchId && hasSolidGeometry && (
+          <button
+            style={featureButtonStyle('#cba6f7')}
+            onClick={handleShell}
+            title="Shell the solid (hollow out with selected faces removed)"
+          >
+            Shell
           </button>
         )}
         {editingSketchId && (
@@ -464,6 +503,16 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
           title="Create a sketch on the selected face"
         >
           Sketch on Face
+        </button>
+      )}
+
+      {!editingSketchId && hasSolidGeometry && (
+        <button
+          style={featureButtonStyle('#cba6f7')}
+          onClick={handleShell}
+          title="Shell the solid (hollow out with selected faces removed)"
+        >
+          Shell
         </button>
       )}
 

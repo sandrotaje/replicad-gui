@@ -12,6 +12,7 @@ import type {
   CutFeature,
   ChamferFeature,
   FilletFeature,
+  ShellFeature,
   SketchElement,
   Point,
   ShapeData,
@@ -76,7 +77,8 @@ function getFeatureDependencies(feature: Feature): string[] {
 
     case 'chamfer':
     case 'fillet':
-      // Chamfer/Fillet depends on target feature
+    case 'shell':
+      // Chamfer/Fillet/Shell depends on target feature
       deps.push(feature.targetFeatureId);
       break;
   }
@@ -644,6 +646,21 @@ export class FeatureEvaluator {
   }
 
   /**
+   * Generate replicad code for a shell feature
+   */
+  generateShellCode(
+    shell: ShellFeature,
+    resultVarName: string
+  ): string {
+    if (shell.faceIndices.length === 0) {
+      return `${resultVarName} = ${resultVarName}.shell({ thickness: ${shell.thickness.toFixed(2)} });`;
+    }
+
+    const faceSelectors = shell.faceIndices.map((idx) => `${resultVarName}.faces[${idx}]`).join(', ');
+    return `${resultVarName} = ${resultVarName}.shell(${shell.thickness.toFixed(2)}, (f) => f.inList([${faceSelectors}]));`;
+  }
+
+  /**
    * Topologically sort features so dependencies come before dependents
    * Uses Kahn's algorithm for topological sorting
    */
@@ -822,6 +839,17 @@ function main() {
 
           const filletCode = this.generateFilletCode(feature, 'result');
           lines.push(`  ${filletCode}`);
+          break;
+        }
+
+        case 'shell': {
+          if (!resultInitialized) {
+            lines.push(`  // ERROR: Cannot shell without existing geometry`);
+            break;
+          }
+
+          const shellCode = this.generateShellCode(feature, 'result');
+          lines.push(`  ${shellCode}`);
           break;
         }
       }
