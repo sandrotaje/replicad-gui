@@ -341,7 +341,7 @@ function CameraFit() {
     const size = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
     const fov = (camera as THREE.PerspectiveCamera).fov * (Math.PI / 180);
-    const dist = (maxDim / 2) / Math.tan(fov / 2) * 1.5;
+    const dist = (maxDim / 2) / Math.tan(fov / 2) * 2.5;
 
     // Position camera at isometric angle from center
     const offset = new THREE.Vector3(1, 1, 1).normalize().multiplyScalar(dist);
