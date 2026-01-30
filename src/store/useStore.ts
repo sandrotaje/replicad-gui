@@ -10,6 +10,7 @@ import type {
   Point,
   OperationType,
   ClosedProfileGroup,
+  OpenPathGroup,
 } from '../types';
 import { parseElementsFromCode } from '../utils/codeParser';
 
@@ -81,6 +82,9 @@ interface AppState {
   // Detected closed profiles from chained elements (for visual feedback and sync)
   detectedClosedProfiles: ClosedProfileGroup[];
 
+  // Detected open paths from chained elements (for sweep path sync)
+  detectedOpenPaths: OpenPathGroup[];
+
   // Sync tracking (to prevent infinite loops)
   lastUpdateSource: UpdateSource;
 
@@ -124,6 +128,7 @@ interface AppState {
 
   // Closed profile detection
   setDetectedClosedProfiles: (profiles: ClosedProfileGroup[]) => void;
+  setDetectedOpenPaths: (paths: OpenPathGroup[]) => void;
 
   // Constraint selection actions
   selectPoint: (id: string, multiSelect?: boolean) => void;
@@ -484,6 +489,7 @@ function main() {
   sketchPlane: 'XY' as SketchPlane,
   faceOutline: null,
   detectedClosedProfiles: [],
+  detectedOpenPaths: [],
   lastUpdateSource: null,
   sketchHistory: {
     undoStack: [],
@@ -909,6 +915,7 @@ function main() {
 
   // Closed profile detection
   setDetectedClosedProfiles: (profiles) => set({ detectedClosedProfiles: profiles }),
+  setDetectedOpenPaths: (paths) => set({ detectedOpenPaths: paths }),
 
   // Constraint selection actions
   selectPoint: (id, multiSelect = false) =>

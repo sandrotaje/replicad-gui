@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { useFeatureStore } from '../store/useFeatureStore';
 import { FeatureEditDialog } from './FeatureEditDialog';
 import { BevelEditDialog } from './BevelEditDialog';
+import { SweepDialog } from './SweepDialog';
 import type {
   Feature,
   SketchFeature,
@@ -10,6 +11,7 @@ import type {
   ChamferFeature,
   FilletFeature,
   ShellFeature,
+  SweepFeature,
 } from '../types';
 
 // ============ PROJECT MENU COMPONENT ============
@@ -210,6 +212,8 @@ const FeatureIcon: React.FC<FeatureIconProps> = ({ type }) => {
       return <span style={iconStyle} title="Chamfer">📐</span>;
     case 'fillet':
       return <span style={iconStyle} title="Fillet">⭕</span>;
+    case 'sweep':
+      return <span style={iconStyle} title="Sweep">🔀</span>;
     case 'shell':
       return <span style={iconStyle} title="Shell">🥚</span>;
     default:
@@ -302,6 +306,10 @@ const FeatureItem: React.FC<FeatureItemProps> = ({
       case 'fillet': {
         const fillet = feature as FilletFeature;
         return `Radius: ${fillet.radius}`;
+      }
+      case 'sweep': {
+        const sweep = feature as SweepFeature;
+        return `${sweep.operation === 'fuse' ? 'Fuse' : sweep.operation === 'cut' ? 'Cut' : 'New'} sweep`;
       }
       case 'shell': {
         const shell = feature as ShellFeature;
@@ -417,6 +425,16 @@ function calculateDepth(feature: Feature, allFeatures: Feature[]): number {
     return 0;
   }
 
+  // Sweep depends on two sketches - use the profile sketch depth
+  if (feature.type === 'sweep') {
+    const profileSketchId = (feature as SweepFeature).profileSketchId;
+    const profileSketch = allFeatures.find((f) => f.id === profileSketchId);
+    if (profileSketch) {
+      return calculateDepth(profileSketch, allFeatures);
+    }
+    return 0;
+  }
+
   // Chamfer, fillet, and shell depend on their target feature
   // They stay at the same level as their target (like extrusion stays at sketch level)
   if (feature.type === 'chamfer' || feature.type === 'fillet' || feature.type === 'shell') {
@@ -513,7 +531,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
             <span>Edit Sketch</span>
           </div>
         )}
-        {(feature.type === 'extrusion' || feature.type === 'cut' || feature.type === 'chamfer' || feature.type === 'fillet' || feature.type === 'shell') && onEditParameters && (
+        {(feature.type === 'extrusion' || feature.type === 'cut' || feature.type === 'chamfer' || feature.type === 'fillet' || feature.type === 'shell' || feature.type === 'sweep') && onEditParameters && (
           <div
             style={menuItemStyle}
             onClick={() => {
@@ -607,6 +625,9 @@ export const FeatureTree: React.FC = () => {
   // Bevel edit dialog state
   const [editingBevelFeature, setEditingBevelFeature] = useState<ChamferFeature | FilletFeature | null>(null);
 
+  // Sweep edit dialog state
+  const [editingSweepFeature, setEditingSweepFeature] = useState<SweepFeature | null>(null);
+
   // Project menu state
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [projectMenuPosition, setProjectMenuPosition] = useState<{ left: number; top: number } | null>(null);
@@ -629,6 +650,8 @@ export const FeatureTree: React.FC = () => {
         setEditingFeature(feature as ExtrusionFeature | CutFeature | ShellFeature);
       } else if (feature.type === 'chamfer' || feature.type === 'fillet') {
         setEditingBevelFeature(feature as ChamferFeature | FilletFeature);
+      } else if (feature.type === 'sweep') {
+        setEditingSweepFeature(feature as SweepFeature);
       }
     },
     [startEditingSketch]
@@ -640,6 +663,8 @@ export const FeatureTree: React.FC = () => {
         setEditingFeature(contextMenu.feature as ExtrusionFeature | CutFeature | ShellFeature);
       } else if (contextMenu.feature.type === 'chamfer' || contextMenu.feature.type === 'fillet') {
         setEditingBevelFeature(contextMenu.feature as ChamferFeature | FilletFeature);
+      } else if (contextMenu.feature.type === 'sweep') {
+        setEditingSweepFeature(contextMenu.feature as SweepFeature);
       }
     }
   }, [contextMenu]);
@@ -916,6 +941,23 @@ export const FeatureTree: React.FC = () => {
           feature={editingBevelFeature}
           onSave={handleSaveBevelEdit}
           onCancel={handleCancelBevelEdit}
+        />
+      )}
+
+      {/* Sweep edit dialog */}
+      {editingSweepFeature && (
+        <SweepDialog
+          isOpen={true}
+          editFeature={editingSweepFeature}
+          onConfirm={(profileSketchId, pathSketchId, operation) => {
+            updateFeature(editingSweepFeature.id, {
+              profileSketchId,
+              pathSketchId,
+              operation,
+            });
+            setEditingSweepFeature(null);
+          }}
+          onCancel={() => setEditingSweepFeature(null)}
         />
       )}
     </div>

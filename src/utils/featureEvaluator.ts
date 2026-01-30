@@ -13,10 +13,12 @@ import type {
   ChamferFeature,
   FilletFeature,
   ShellFeature,
+  SweepFeature,
   SketchElement,
   Point,
   ShapeData,
   ClosedProfileGroup,
+  OpenPathGroup,
 } from '../types';
 import {
   getElementEndpoints,
@@ -73,6 +75,11 @@ function getFeatureDependencies(feature: Feature): string[] {
       deps.push(feature.sketchId);
       // If operation is 'fuse' or 'cut', also depends on previous result
       // (handled implicitly by using 'result' variable)
+      break;
+
+    case 'sweep':
+      deps.push(feature.profileSketchId);
+      deps.push(feature.pathSketchId);
       break;
 
     case 'chamfer':
@@ -661,6 +668,102 @@ export class FeatureEvaluator {
   }
 
   /**
+   * Generate drawing code for an open path (chain of elements without .close())
+   * Returns draw().commands...done() that forms a wire
+   */
+  private generateOpenPathDrawingCode(
+    path: OpenPathGroup,
+    elements: SketchElement[]
+  ): string | null {
+    if (path.elementIds.length === 0) return null;
+
+    const orderedElements: SketchElement[] = [];
+    for (const id of path.elementIds) {
+      const elem = elements.find((e) => e.id === id);
+      if (elem) orderedElements.push(elem);
+    }
+    if (orderedElements.length === 0) return null;
+
+    const firstElem = orderedElements[0];
+    const endpoints = getElementEndpoints(firstElem);
+    if (!endpoints) return null;
+
+    const startPoint = endpoints.start;
+    let code = `draw([${startPoint.x.toFixed(2)}, ${startPoint.y.toFixed(2)}])`;
+    let currentEndpoint = startPoint;
+
+    for (const element of orderedElements) {
+      const command = this.getChainedDrawingCommand(element, currentEndpoint);
+      if (command) code += command;
+
+      const ep = getElementEndpoints(element);
+      if (ep) {
+        const distToStart = Math.hypot(
+          currentEndpoint.x - ep.start.x,
+          currentEndpoint.y - ep.start.y
+        );
+        const distToEnd = Math.hypot(
+          currentEndpoint.x - ep.end.x,
+          currentEndpoint.y - ep.end.y
+        );
+        currentEndpoint = distToEnd < distToStart ? ep.start : ep.end;
+      }
+    }
+
+    // .done() produces a wire (open path), not a closed sketch
+    code += '.done()';
+    return code;
+  }
+
+  /**
+   * Generate the first open path drawing code from a sketch
+   */
+  generateOpenPathCode(sketch: SketchFeature): string | null {
+    if (!sketch.openPaths || sketch.openPaths.length === 0) return null;
+    return this.generateOpenPathDrawingCode(sketch.openPaths[0], sketch.elements);
+  }
+
+  /**
+   * Generate replicad code for a sweep feature
+   */
+  generateSweepCode(
+    sweep: SweepFeature,
+    profileSketchVarName: string,
+    sweepVarName: string,
+    resultVarName: string,
+    features: Feature[],
+    declareResult: boolean = false
+  ): string {
+    const profileSketch = features.find((f) => f.id === sweep.profileSketchId) as SketchFeature | undefined;
+    const pathSketch = features.find((f) => f.id === sweep.pathSketchId) as SketchFeature | undefined;
+
+    if (!profileSketch) return `// ERROR: Profile sketch not found`;
+    if (!pathSketch) return `// ERROR: Path sketch not found`;
+
+    const pathPlane = pathSketch.reference.type === 'standard'
+      ? pathSketch.reference.plane
+      : 'XY';
+
+    const lines: string[] = [];
+    lines.push(`const ${sweepVarName}_wire = ${sweepVarName}_path.sketchOnPlane("${pathPlane}");`);
+    lines.push(`const ${sweepVarName}_swept = ${sweepVarName}_wire.sweepSketch(`);
+    lines.push(`  (plane, origin) => ${profileSketchVarName}[0].sketchOnPlane(plane, origin),`);
+    lines.push(`  { withContact: true }`);
+    lines.push(`);`);
+
+    const decl = declareResult ? 'let ' : '';
+    if (sweep.operation === 'new') {
+      lines.push(`${decl}${resultVarName} = ${sweepVarName}_swept;`);
+    } else if (sweep.operation === 'cut') {
+      lines.push(`${resultVarName} = ${resultVarName}.cut(${sweepVarName}_swept);`);
+    } else {
+      lines.push(`${decl}${resultVarName} = ${resultVarName}.fuse(${sweepVarName}_swept);`);
+    }
+
+    return lines.join('\n  ');
+  }
+
+  /**
    * Topologically sort features so dependencies come before dependents
    * Uses Kahn's algorithm for topological sorting
    */
@@ -839,6 +942,44 @@ function main() {
 
           const filletCode = this.generateFilletCode(feature, 'result');
           lines.push(`  ${filletCode}`);
+          break;
+        }
+
+        case 'sweep': {
+          const profileSketchVarName = featureVarNames.get(feature.profileSketchId);
+          const pathSketchVarName = featureVarNames.get(feature.pathSketchId);
+          if (!profileSketchVarName || !pathSketchVarName) {
+            lines.push(`  // ERROR: Sketches for sweep not found`);
+            break;
+          }
+
+          // Use the sweep feature's own varName for intermediates to avoid collisions
+          const sweepVarName = varName;
+
+          // Generate the open path wire code for the path sketch
+          const pathSketch = orderedFeatures.find((f) => f.id === feature.pathSketchId) as SketchFeature | undefined;
+          if (pathSketch) {
+            const pathCode = this.generateOpenPathCode(pathSketch);
+            if (pathCode) {
+              lines.push(`  const ${sweepVarName}_path = ${pathCode};`);
+            } else {
+              lines.push(`  // ERROR: No open path in path sketch`);
+              break;
+            }
+          }
+
+          {
+            const sweepCode = this.generateSweepCode(
+              feature,
+              profileSketchVarName,
+              sweepVarName,
+              'result',
+              orderedFeatures,
+              !resultInitialized
+            );
+            lines.push(`  ${sweepCode}`);
+            if (!resultInitialized) resultInitialized = true;
+          }
           break;
         }
 

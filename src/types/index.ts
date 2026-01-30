@@ -95,6 +95,12 @@ export interface ClosedProfileGroup {
   isClosed: boolean;     // Validated as actually closed
 }
 
+// Group of elements forming an open path (for sweep paths)
+export interface OpenPathGroup {
+  id: string;
+  elementIds: string[];  // Ordered list of element IDs forming the open path
+}
+
 // Tool types for the sketcher
 export type SketchTool =
   | 'select'
@@ -246,7 +252,8 @@ export type FeatureType =
   | 'chamfer'
   | 'fillet'
   | 'revolve'
-  | 'shell';
+  | 'shell'
+  | 'sweep';
 
 export interface FeatureBase {
   id: string;
@@ -282,6 +289,7 @@ export interface SketchFeature extends FeatureBase {
   elements: SketchElement[];       // 2D sketch elements (existing type)
   isClosed: boolean;               // Is the sketch a closed profile? (legacy, for single-element profiles)
   closedProfiles?: ClosedProfileGroup[];  // Detected closed profiles from chained elements
+  openPaths?: OpenPathGroup[];            // Detected open paths (for sweep paths)
   constraints: Constraint[];       // Geometric constraints
 }
 
@@ -320,6 +328,14 @@ export interface FilletFeature extends FeatureBase {
   radius: number;                  // Fillet radius
 }
 
+// Sweep Feature - sweeps a profile along a path
+export interface SweepFeature extends FeatureBase {
+  type: 'sweep';
+  profileSketchId: string;         // Sketch with closed profile (cross-section)
+  pathSketchId: string;            // Sketch with open path (trajectory)
+  operation: 'new' | 'fuse' | 'cut';  // How to combine with existing geometry
+}
+
 // Shell Feature
 export interface ShellFeature extends FeatureBase {
   type: 'shell';
@@ -335,6 +351,7 @@ export type Feature =
   | CutFeature
   | ChamferFeature
   | FilletFeature
+  | SweepFeature
   | ShellFeature;
 
 // ============ HISTORY/SNAPSHOT TYPES ============

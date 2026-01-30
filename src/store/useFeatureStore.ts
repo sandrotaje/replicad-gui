@@ -172,6 +172,11 @@ function getFeatureDependencies(feature: Feature): string[] {
       deps.push(feature.sketchId);
       break;
 
+    case 'sweep':
+      deps.push(feature.profileSketchId);
+      deps.push(feature.pathSketchId);
+      break;
+
     case 'chamfer':
     case 'fillet':
     case 'shell':
@@ -851,6 +856,7 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
       fillet: 'Fillet',
       revolve: 'Revolve',
       shell: 'Shell',
+      sweep: 'Sweep',
     };
 
     const baseName = typeNames[type] || type;

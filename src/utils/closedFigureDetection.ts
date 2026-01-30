@@ -5,7 +5,7 @@
  * (lines, arcs, splines) form closed profiles that can be extruded or cut.
  */
 
-import type { SketchElement, Point } from '../types';
+import type { SketchElement, Point, OpenPathGroup } from '../types';
 
 // ============ Types ============
 
@@ -374,4 +374,97 @@ export function getProfileCenter(
     x: sumX / points.length,
     y: sumY / points.length,
   };
+}
+
+/**
+ * Detect open paths from a list of sketch elements.
+ * An open path is a connected component of chainable elements that does NOT form a closed loop.
+ * Valid open paths have exactly two degree-1 endpoints (chain ends) and all internal nodes have degree 2.
+ * Single standalone chainable elements also count as valid open paths.
+ */
+export function detectOpenPaths(elements: SketchElement[]): OpenPathGroup[] {
+  const chainableElements = elements.filter(isChainableElement);
+  if (chainableElements.length === 0) return [];
+
+  const adjacency = buildAdjacencyMap(chainableElements);
+  const components = findConnectedComponents(chainableElements, adjacency);
+  const openPaths: OpenPathGroup[] = [];
+
+  for (const componentIds of components) {
+    // Skip closed loops
+    if (isClosedLoop(componentIds, chainableElements, adjacency)) continue;
+
+    // Single element: always a valid open path (unless it's self-closing)
+    if (componentIds.length === 1) {
+      const elem = chainableElements.find(e => e.id === componentIds[0]);
+      if (!elem) continue;
+      const endpoints = getElementEndpoints(elem);
+      if (!endpoints) continue;
+      // Skip if start==end (closed single element)
+      if (pointsEqual(endpoints.start, endpoints.end)) continue;
+      openPaths.push({ id: crypto.randomUUID(), elementIds: componentIds });
+      continue;
+    }
+
+    // Multi-element: check valid chain topology (exactly 2 degree-1 nodes)
+    const componentSet = new Set(componentIds);
+    let degree1Nodes: string[] = [];
+    let valid = true;
+
+    for (const elemId of componentIds) {
+      const neighbors = (adjacency.get(elemId) || []).filter(n => componentSet.has(n.elementId));
+      const degree = neighbors.length;
+      if (degree === 1) {
+        degree1Nodes.push(elemId);
+      } else if (degree !== 2) {
+        valid = false;
+        break;
+      }
+    }
+
+    if (!valid || degree1Nodes.length !== 2) continue;
+
+    // Order from one endpoint to the other
+    const orderedIds = orderChainFromEndpoint(degree1Nodes[0], componentIds, adjacency);
+    if (orderedIds.length === componentIds.length) {
+      openPaths.push({ id: crypto.randomUUID(), elementIds: orderedIds });
+    }
+  }
+
+  return openPaths;
+}
+
+/**
+ * Order elements in an open chain starting from a degree-1 endpoint.
+ */
+function orderChainFromEndpoint(
+  startId: string,
+  componentIds: string[],
+  adjacency: Map<string, Array<{ elementId: string; atMyStart: boolean; atTheirStart: boolean }>>
+): string[] {
+  const componentSet = new Set(componentIds);
+  const orderedIds: string[] = [];
+  const visited = new Set<string>();
+
+  let currentId = startId;
+  // For the start node, determine which end connects to a neighbor
+  const startNeighbors = (adjacency.get(currentId) || []).filter(n => componentSet.has(n.elementId));
+  // The start node has degree 1, so it connects at one end only
+  let enteredAtStart = startNeighbors.length > 0 ? startNeighbors[0].atMyStart : true;
+
+  while (!visited.has(currentId)) {
+    visited.add(currentId);
+    orderedIds.push(currentId);
+
+    const neighbors = (adjacency.get(currentId) || []).filter(n => componentSet.has(n.elementId));
+    const exitAtMyStart = !enteredAtStart;
+    const nextConnection = neighbors.find(n => n.atMyStart === exitAtMyStart && !visited.has(n.elementId));
+
+    if (!nextConnection) break;
+
+    currentId = nextConnection.elementId;
+    enteredAtStart = nextConnection.atTheirStart;
+  }
+
+  return orderedIds;
 }

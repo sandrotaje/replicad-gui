@@ -24,6 +24,7 @@ export function useFeatureSketchSync() {
   // Legacy store state
   const legacyElements = useStore((state) => state.elements);
   const detectedClosedProfiles = useStore((state) => state.detectedClosedProfiles);
+  const detectedOpenPaths = useStore((state) => state.detectedOpenPaths);
 
   // Get the current editing sketch from the feature store
   const editingSketch = editingSketchId
@@ -138,6 +139,22 @@ export function useFeatureSketchSync() {
       });
     }
   }, [editingSketchId, detectedClosedProfiles, features, updateFeature]);
+
+  // Sync open paths from legacy store to feature store
+  useEffect(() => {
+    if (!editingSketchId || syncInProgressRef.current) return;
+
+    const currentSketch = features.find((f) => f.id === editingSketchId) as SketchFeature | undefined;
+    if (!currentSketch) return;
+
+    const currentPathsJson = JSON.stringify(currentSketch.openPaths || []);
+    const newPathsJson = JSON.stringify(detectedOpenPaths);
+    if (currentPathsJson !== newPathsJson) {
+      updateFeature(editingSketchId, {
+        openPaths: detectedOpenPaths,
+      });
+    }
+  }, [editingSketchId, detectedOpenPaths, features, updateFeature]);
 
   // Sync from feature store to legacy store when feature elements change
   // This handles constraint solving and other feature-side updates

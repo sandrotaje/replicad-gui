@@ -29,6 +29,7 @@ import {
 } from '../types';
 import {
   detectClosedProfiles,
+  detectOpenPaths,
   getElementEndpoints,
 } from '../utils/closedFigureDetection';
 
@@ -136,11 +137,21 @@ export function Sketcher() {
     [currentPlaneElements]
   );
 
-  // Notify store of detected closed profiles for feature sync
+  // Detect open paths whenever current plane elements change
+  const detectedOpenPaths = useMemo(
+    () => detectOpenPaths(currentPlaneElements),
+    [currentPlaneElements]
+  );
+
+  // Notify store of detected closed profiles and open paths for feature sync
   const setDetectedClosedProfiles = useStore((state) => state.setDetectedClosedProfiles);
+  const setDetectedOpenPaths = useStore((state) => state.setDetectedOpenPaths);
   useEffect(() => {
     setDetectedClosedProfiles?.(detectedClosedProfiles);
   }, [detectedClosedProfiles, setDetectedClosedProfiles]);
+  useEffect(() => {
+    setDetectedOpenPaths?.(detectedOpenPaths);
+  }, [detectedOpenPaths, setDetectedOpenPaths]);
 
   // Extract solver primitives from current plane elements for point/line/circle hit detection
   const solverPrimitives = useMemo(

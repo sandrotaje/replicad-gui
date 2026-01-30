@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useStore } from '../store/useStore';
 import { useFeatureStore } from '../store/useFeatureStore';
-import type { SketchFeature, ExtrusionFeature, CutFeature, ChamferFeature, FilletFeature, ShellFeature, Feature } from '../types';
+import type { SketchFeature, ExtrusionFeature, CutFeature, ChamferFeature, FilletFeature, ShellFeature, SweepFeature, Feature, StandardPlane } from '../types';
 import { exportToSTL } from '../utils/stlExporter';
 import { DepthPromptDialog, type OperationDirection } from './DepthPromptDialog';
 import { BevelDialog, type BevelType } from './BevelDialog';
+import { SweepDialog } from './SweepDialog';
 
 // Undo/Redo button styles
 const undoRedoButtonStyle = (enabled: boolean) => ({
@@ -39,6 +40,12 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
   // Bevel dialog state
   const [showBevelDialog, setShowBevelDialog] = useState(false);
   const [pendingBevelType, setPendingBevelType] = useState<BevelType | null>(null);
+
+  // Sweep dialog state
+  const [showSweepDialog, setShowSweepDialog] = useState(false);
+
+  // Plane picker state
+  const [showPlanePicker, setShowPlanePicker] = useState(false);
 
   // Sketch undo/redo
   const sketchUndo = useStore((state) => state.sketchUndo);
@@ -98,10 +105,15 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
 
   // Feature handlers
   const handleNewSketch = () => {
+    setShowPlanePicker(true);
+  };
+
+  const handlePlaneSelected = (plane: StandardPlane) => {
+    setShowPlanePicker(false);
     const sketchFeatureData: Omit<SketchFeature, 'id' | 'createdAt' | 'isValid' | 'isDirty'> = {
       type: 'sketch',
       name: generateUniqueName('sketch'),
-      reference: { type: 'standard', plane: 'XY', offset: 0 },
+      reference: { type: 'standard', plane, offset: 0 },
       elements: [],
       isClosed: false,
       isCollapsed: false,
@@ -122,8 +134,8 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
     const boundaryPoints = selectedPlanarFace.boundaryPoints2D || [];
 
     // Find the last 3D-generating feature (extrusion or cut) to reference
-    const solidFeatures = features.filter(f => f.type === 'extrusion' || f.type === 'cut');
-    const lastSolidFeature = solidFeatures[solidFeatures.length - 1] as ExtrusionFeature | CutFeature | undefined;
+    const solidFeatures = features.filter(f => f.type === 'extrusion' || f.type === 'cut' || f.type === 'sweep');
+    const lastSolidFeature = solidFeatures[solidFeatures.length - 1] as ExtrusionFeature | CutFeature | SweepFeature | undefined;
 
     if (!lastSolidFeature) {
       console.warn('Cannot sketch on face: No solid features (extrusion/cut) found. Create an extrusion first.');
@@ -161,7 +173,7 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
     if (!editingSketchId || extrudableElementCount === 0) return;
 
     // Cut requires existing geometry
-    const hasExistingExtrusions = features.some(f => f.type === 'extrusion');
+    const hasExistingExtrusions = features.some(f => f.type === 'extrusion' || f.type === 'sweep');
     if (!hasExistingExtrusions) {
       console.warn('Cannot cut: No existing geometry to cut from');
       return;
@@ -175,7 +187,7 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
     if (!editingSketchId || !pendingOperation) return;
 
     if (pendingOperation === 'extrude') {
-      const hasExistingExtrusions = features.some(f => f.type === 'extrusion');
+      const hasExistingExtrusions = features.some(f => f.type === 'extrusion' || f.type === 'sweep');
       const extrusionFeatureData: Omit<ExtrusionFeature, 'id' | 'createdAt' | 'isValid' | 'isDirty'> = {
         type: 'extrusion',
         name: generateUniqueName('extrusion'),
@@ -213,7 +225,7 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
 
   // Find the last solid feature (extrusion or cut) for bevel operations
   const getLastSolidFeatureId = (): string | null => {
-    const solidFeatures = features.filter(f => f.type === 'extrusion' || f.type === 'cut' || f.type === 'chamfer' || f.type === 'fillet');
+    const solidFeatures = features.filter(f => f.type === 'extrusion' || f.type === 'cut' || f.type === 'sweep' || f.type === 'chamfer' || f.type === 'fillet');
     return solidFeatures.length > 0 ? solidFeatures[solidFeatures.length - 1].id : null;
   };
 
@@ -313,6 +325,45 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
     }
   };
 
+  // Sweep handlers
+  const handleSweep = () => {
+    setShowSweepDialog(true);
+  };
+
+  const handleSweepConfirm = (profileSketchId: string, pathSketchId: string, operation: 'new' | 'fuse' | 'cut') => {
+    const sweepFeatureData: Omit<SweepFeature, 'id' | 'createdAt' | 'isValid' | 'isDirty'> = {
+      type: 'sweep',
+      name: generateUniqueName('sweep'),
+      profileSketchId,
+      pathSketchId,
+      operation,
+      isCollapsed: false,
+    };
+    addFeature(sweepFeatureData as Omit<Feature, 'id' | 'createdAt' | 'isValid' | 'isDirty'>);
+    setShowSweepDialog(false);
+    if (isMobile && setToolsOpen) {
+      setToolsOpen(false);
+    }
+  };
+
+  const handleSweepCancel = () => {
+    setShowSweepDialog(false);
+  };
+
+  // Check if sweep is available (need at least one sketch with a closed profile and one with an open path)
+  const hasSketchWithClosedProfile = features.some((f) => {
+    if (f.type !== 'sketch') return false;
+    const s = f as SketchFeature;
+    // Standalone closed shapes (rectangle, circle) or chained closed profiles
+    const hasStandalone = s.elements.some(e => e.type === 'rectangle' || e.type === 'circle');
+    const hasChainedProfiles = (s.closedProfiles?.length ?? 0) > 0;
+    return hasStandalone || hasChainedProfiles;
+  });
+  const hasSketchWithOpenPath = features.some(
+    (f) => f.type === 'sketch' && ((f as SketchFeature).openPaths?.length ?? 0) > 0
+  );
+  const hasSweepEligibleSketches = hasSketchWithClosedProfile && hasSketchWithOpenPath;
+
   const handleExportSTL = () => {
     if (!shapeData) return;
     exportToSTL(shapeData, 'model.stl');
@@ -374,6 +425,15 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
             Shell
           </button>
         )}
+        {!editingSketchId && hasSweepEligibleSketches && (
+          <button
+            style={featureButtonStyle('#94e2d5')}
+            onClick={handleSweep}
+            title="Sweep a profile along a path"
+          >
+            Sweep
+          </button>
+        )}
         {editingSketchId && (
           <>
             <button
@@ -385,11 +445,11 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
               Extrude
             </button>
             <button
-              style={extrudableElementCount > 0 && features.some(f => f.type === 'extrusion')
+              style={extrudableElementCount > 0 && features.some(f => f.type === 'extrusion' || f.type === 'sweep')
                 ? featureButtonStyle('#f38ba8')
                 : disabledButtonStyle()}
               onClick={handleCut}
-              disabled={extrudableElementCount === 0 || !features.some(f => f.type === 'extrusion')}
+              disabled={extrudableElementCount === 0 || !features.some(f => f.type === 'extrusion' || f.type === 'sweep')}
               title="Cut using the current sketch (X)"
             >
               Cut
@@ -516,6 +576,16 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
         </button>
       )}
 
+      {!editingSketchId && hasSweepEligibleSketches && (
+        <button
+          style={featureButtonStyle('#94e2d5')}
+          onClick={handleSweep}
+          title="Sweep a profile along a path"
+        >
+          Sweep
+        </button>
+      )}
+
       {editingSketchId && (
         <>
           <button
@@ -527,11 +597,11 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
             Extrude
           </button>
           <button
-            style={extrudableElementCount > 0 && features.some(f => f.type === 'extrusion')
+            style={extrudableElementCount > 0 && features.some(f => f.type === 'extrusion' || f.type === 'sweep')
               ? featureButtonStyle('#f38ba8')
               : disabledButtonStyle()}
             onClick={handleCut}
-            disabled={extrudableElementCount === 0 || !features.some(f => f.type === 'extrusion')}
+            disabled={extrudableElementCount === 0 || !features.some(f => f.type === 'extrusion' || f.type === 'sweep')}
             title="Cut using the current sketch (X)"
           >
             Cut
@@ -702,6 +772,65 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
         onConfirm={handleBevelConfirm}
         onCancel={handleBevelCancel}
       />
+
+      {/* Sweep dialog */}
+      <SweepDialog
+        isOpen={showSweepDialog}
+        onConfirm={handleSweepConfirm}
+        onCancel={handleSweepCancel}
+      />
+
+      {/* Plane picker dialog */}
+      {showPlanePicker && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0, left: 0, right: 0, bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+          onClick={() => setShowPlanePicker(false)}
+        >
+          <div
+            style={{
+              backgroundColor: '#1e1e2e',
+              border: '1px solid #313244',
+              borderRadius: '8px',
+              padding: '20px',
+              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontSize: '14px', fontWeight: 600, color: '#cdd6f4', marginBottom: '12px' }}>
+              Select Sketch Plane
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              {(['XY', 'XZ', 'YZ'] as StandardPlane[]).map((plane) => (
+                <button
+                  key={plane}
+                  onClick={() => handlePlaneSelected(plane)}
+                  style={{
+                    padding: '10px 20px',
+                    border: '1px solid #45475a',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    fontSize: '14px',
+                    backgroundColor: '#313244',
+                    color: '#cdd6f4',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  {plane}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
