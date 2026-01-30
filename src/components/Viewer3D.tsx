@@ -1,7 +1,7 @@
-import { Canvas, type ThreeEvent } from '@react-three/fiber';
+import { Canvas, useThree, type ThreeEvent } from '@react-three/fiber';
 import { OrbitControls, Grid, Environment } from '@react-three/drei';
 import { useStore } from '../store/useStore';
-import { useMemo, useCallback, useEffect } from 'react';
+import { useMemo, useCallback, useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import type { IndividualFace, IndividualEdge } from '../types';
 
@@ -315,6 +315,48 @@ function IndividualEdgeMeshes() {
   );
 }
 
+function CameraFit() {
+  const shapeData = useStore((state) => state.shapeData);
+  const { camera, controls } = useThree();
+  const prevShapeDataRef = useRef(shapeData);
+
+  useEffect(() => {
+    if (!shapeData || shapeData === prevShapeDataRef.current) return;
+    prevShapeDataRef.current = shapeData;
+
+    // Build bounding box from all face vertices (CAD Z-up → Three.js Y-up)
+    const box = new THREE.Box3();
+    const v = new THREE.Vector3();
+    for (const face of shapeData.individualFaces) {
+      const verts = face.vertices;
+      for (let i = 0; i < verts.length; i += 3) {
+        v.set(verts[i], verts[i + 2], -verts[i + 1]);
+        box.expandByPoint(v);
+      }
+    }
+
+    if (box.isEmpty()) return;
+
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const fov = (camera as THREE.PerspectiveCamera).fov * (Math.PI / 180);
+    const dist = (maxDim / 2) / Math.tan(fov / 2) * 1.5;
+
+    // Position camera at isometric angle from center
+    const offset = new THREE.Vector3(1, 1, 1).normalize().multiplyScalar(dist);
+    camera.position.copy(center).add(offset);
+    camera.lookAt(center);
+
+    if (controls) {
+      (controls as any).target.copy(center);
+      (controls as any).update();
+    }
+  }, [shapeData, camera, controls]);
+
+  return null;
+}
+
 function SimpleEdges() {
   const shapeData = useStore((state) => state.shapeData);
 
@@ -404,6 +446,7 @@ function Scene() {
       />
 
       <OrbitControls makeDefault minPolarAngle={0} maxPolarAngle={Math.PI} />
+      <CameraFit />
       <Environment preset="studio" />
     </>
   );
