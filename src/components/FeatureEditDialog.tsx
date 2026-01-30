@@ -156,7 +156,10 @@ export const FeatureEditDialog: React.FC<FeatureEditDialogProps> = ({
 
   return (
     <div style={overlayStyle} onClick={onCancel}>
-      <div style={dialogStyle} onClick={(e) => e.stopPropagation()}>
+      <div style={dialogStyle} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => {
+        if (e.key === 'Enter') handleSave();
+        if (e.key === 'Escape') onCancel();
+      }}>
         <div style={headerStyle}>
           <span>{getIcon()}</span>
           <span>Edit {feature.name}</span>
