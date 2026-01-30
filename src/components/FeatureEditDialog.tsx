@@ -14,8 +14,8 @@ export const FeatureEditDialog: React.FC<FeatureEditDialogProps> = ({
   onSave,
   onCancel,
 }) => {
-  const [depth, setDepth] = useState<number | 'through'>(
-    feature.type === 'shell' ? 0 : feature.depth
+  const [depthStr, setDepthStr] = useState<string>(
+    feature.type === 'shell' ? '0' : String(feature.depth)
   );
   const [direction, setDirection] = useState<'normal' | 'reverse' | 'both'>(
     feature.type === 'shell' ? 'normal' : feature.direction
@@ -23,16 +23,16 @@ export const FeatureEditDialog: React.FC<FeatureEditDialogProps> = ({
   const [operation, setOperation] = useState<'new' | 'fuse' | 'cut'>(
     feature.type === 'extrusion' ? feature.operation : 'cut'
   );
-  const [thickness, setThickness] = useState<number>(
-    feature.type === 'shell' ? feature.thickness : 1
+  const [thicknessStr, setThicknessStr] = useState<string>(
+    feature.type === 'shell' ? String(feature.thickness) : '1'
   );
 
   // Reset form when feature changes
   useEffect(() => {
     if (feature.type === 'shell') {
-      setThickness(feature.thickness);
+      setThicknessStr(String(feature.thickness));
     } else {
-      setDepth(feature.depth);
+      setDepthStr(String(feature.depth));
       setDirection(feature.direction);
       if (feature.type === 'extrusion') {
         setOperation(feature.operation);
@@ -42,8 +42,18 @@ export const FeatureEditDialog: React.FC<FeatureEditDialogProps> = ({
 
   const handleSave = () => {
     if (feature.type === 'shell') {
-      onSave({ thickness } as Partial<ShellFeature>);
+      const t = parseFloat(thicknessStr);
+      if (isNaN(t) || t <= 0) return;
+      onSave({ thickness: t } as Partial<ShellFeature>);
       return;
+    }
+    let depth: number | 'through';
+    if (depthStr.toLowerCase() === 'through') {
+      depth = 'through';
+    } else {
+      const d = parseFloat(depthStr);
+      if (isNaN(d) || d <= 0) return;
+      depth = d;
     }
     const updates: Partial<ExtrusionFeature | CutFeature> = {
       depth,
@@ -53,17 +63,6 @@ export const FeatureEditDialog: React.FC<FeatureEditDialogProps> = ({
       (updates as Partial<ExtrusionFeature>).operation = operation;
     }
     onSave(updates);
-  };
-
-  const handleDepthChange = (value: string) => {
-    if (value.toLowerCase() === 'through') {
-      setDepth('through');
-    } else {
-      const numValue = parseFloat(value);
-      if (!isNaN(numValue) && numValue > 0) {
-        setDepth(numValue);
-      }
-    }
   };
 
   const overlayStyle: React.CSSProperties = {
@@ -168,15 +167,11 @@ export const FeatureEditDialog: React.FC<FeatureEditDialogProps> = ({
           <div style={fieldStyle}>
             <label style={labelStyle}>Wall Thickness</label>
             <input
-              type="number"
-              value={thickness}
-              onChange={(e) => {
-                const v = parseFloat(e.target.value);
-                if (!isNaN(v) && v > 0) setThickness(v);
-              }}
+              type="text"
+              inputMode="numeric"
+              value={thicknessStr}
+              onChange={(e) => setThicknessStr(e.target.value)}
               style={inputStyle}
-              min={0.1}
-              step={0.5}
             />
           </div>
         ) : (
@@ -187,12 +182,11 @@ export const FeatureEditDialog: React.FC<FeatureEditDialogProps> = ({
                 Depth {feature.type === 'cut' && '(or "through")'}
               </label>
               <input
-                type={typeof depth === 'number' ? 'number' : 'text'}
-                value={depth === 'through' ? 'through' : depth}
-                onChange={(e) => handleDepthChange(e.target.value)}
+                type="text"
+                inputMode="numeric"
+                value={depthStr}
+                onChange={(e) => setDepthStr(e.target.value)}
                 style={inputStyle}
-                min={0.1}
-                step={0.5}
               />
             </div>
 
