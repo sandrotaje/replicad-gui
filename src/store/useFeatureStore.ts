@@ -2,8 +2,7 @@ import { create } from 'zustand';
 import type {
   Feature,
   SketchFeature,
-  Command,
-  CommandType,
+  Snapshot,
   FeatureStoreState,
   HistoryState,
   FeatureType,
@@ -33,22 +32,26 @@ interface SavedProjectData {
   version: number;
   savedAt: number;
   features: Feature[];
+  snapshots?: Snapshot[];
+  currentSnapshotIndex?: number;
 }
 
 /**
- * Serialize features to JSON for localStorage
+ * Serialize features and snapshots to JSON for localStorage
  */
-function serializeProject(features: Feature[]): string {
+function serializeProject(features: Feature[], history: HistoryState): string {
   const data: SavedProjectData = {
-    version: 1,
+    version: 2,
     savedAt: Date.now(),
     features,
+    snapshots: history.snapshots,
+    currentSnapshotIndex: history.currentSnapshotIndex,
   };
   return JSON.stringify(data);
 }
 
 /**
- * Deserialize features from localStorage JSON
+ * Deserialize features from localStorage JSON (supports v1 and v2)
  */
 function deserializeProject(json: string): SavedProjectData | null {
   try {
@@ -127,6 +130,8 @@ interface FeatureStoreActions {
   redo: () => void;
   canUndo: () => boolean;
   canRedo: () => boolean;
+  rollbackToFeature: (featureId: string) => void;
+  rollbackToSnapshot: (index: number) => void;
 
   // Utility
   getFeatureByName: (name: string) => Feature | undefined;
@@ -179,25 +184,72 @@ function getFeatureDependencies(feature: Feature): string[] {
 }
 
 /**
- * Create a command for undo/redo
+ * Deep clone features array for snapshot storage
  */
-function createCommand(
-  type: CommandType,
-  payload: Command['payload']
-): Command {
-  return {
+function cloneFeatures(features: Feature[]): Feature[] {
+  return JSON.parse(JSON.stringify(features));
+}
+
+/**
+ * Push a snapshot of the current features state onto the history.
+ * Discards any snapshots after currentSnapshotIndex (forward history).
+ * Caps total snapshots at maxSnapshots.
+ */
+function pushSnapshot(history: HistoryState, features: Feature[], label: string): HistoryState {
+  const { snapshots, currentSnapshotIndex, maxSnapshots } = history;
+
+  // Discard future snapshots (after current index)
+  const kept = snapshots.slice(0, currentSnapshotIndex + 1);
+
+  const newSnapshot: Snapshot = {
     id: crypto.randomUUID(),
-    type,
+    label,
     timestamp: Date.now(),
-    payload,
+    features: cloneFeatures(features),
+  };
+
+  kept.push(newSnapshot);
+
+  // Cap at maxSnapshots, trimming oldest
+  const trimmed = kept.length > maxSnapshots ? kept.slice(kept.length - maxSnapshots) : kept;
+
+  return {
+    snapshots: trimmed,
+    currentSnapshotIndex: trimmed.length - 1,
+    maxSnapshots,
   };
 }
 
 /**
- * Deep clone a feature for storing in command history
+ * Restore features from a snapshot at given index.
+ * Returns the new state slice to merge.
  */
-function cloneFeature(feature: Feature): Feature {
-  return JSON.parse(JSON.stringify(feature));
+function restoreSnapshot(snapshots: Snapshot[], index: number): {
+  features: Feature[];
+  featureById: Map<string, Feature>;
+  dependents: Map<string, Set<string>>;
+  geometryCache: Map<string, unknown>;
+  finalShape: null;
+  activeFeatureId: null;
+  editingSketchId: null;
+} {
+  const snapshot = snapshots[index];
+  const features = cloneFeatures(snapshot.features);
+
+  // Mark all restored features as dirty to trigger re-evaluation
+  const dirtyFeatures = features.map((f) => ({ ...f, isDirty: true } as Feature));
+
+  const { featureById, dependents } = rebuildDerivedState(dirtyFeatures);
+
+  return {
+    features: dirtyFeatures,
+    featureById,
+    dependents,
+    geometryCache: new Map(),
+    finalShape: null,
+    activeFeatureId: null,
+    editingSketchId: null,
+  };
 }
 
 // ============ STORE IMPLEMENTATION ============
@@ -212,9 +264,9 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
   geometryCache: new Map(),
   finalShape: null,
   history: {
-    undoStack: [],
-    redoStack: [],
-    maxHistorySize: 50,
+    snapshots: [],
+    currentSnapshotIndex: -1,
+    maxSnapshots: 30,
   },
 
   // ============ FEATURE CRUD ============
@@ -232,6 +284,9 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
     } as Feature;
 
     set((state) => {
+      // Snapshot current state before mutation
+      const newHistory = pushSnapshot(state.history, state.features, `Add ${newFeature.name || newFeature.type}`);
+
       // Add to features array
       const newFeatures = [...state.features, newFeature];
 
@@ -248,20 +303,6 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
         }
         newDependents.get(depId)!.add(id);
       }
-
-      // Create command for undo
-      const command = createCommand('addFeature', {
-        before: null,
-        after: cloneFeature(newFeature),
-        featureId: id,
-      });
-
-      // Update history
-      const newHistory: HistoryState = {
-        ...state.history,
-        undoStack: [...state.history.undoStack, command].slice(-state.history.maxHistorySize),
-        redoStack: [], // Clear redo stack on new action
-      };
 
       return {
         features: newFeatures,
@@ -284,7 +325,8 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
     }
 
     set((state) => {
-      const oldFeature = cloneFeature(feature);
+      // Snapshot current state before mutation
+      const newHistory = pushSnapshot(state.history, state.features, `Update ${feature.name}`);
 
       const updatedFeature: Feature = {
         ...feature,
@@ -292,12 +334,10 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
         isDirty: true,
       } as Feature;
 
-      // Update features array
       const newFeatures = state.features.map((f) =>
         f.id === id ? updatedFeature : f
       );
 
-      // Update featureById map
       const newFeatureById = new Map(state.featureById);
       newFeatureById.set(id, updatedFeature);
 
@@ -306,33 +346,17 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
       const newDeps = getFeatureDependencies(updatedFeature);
       const newDependents = new Map(state.dependents);
 
-      // Remove from old dependencies
       for (const depId of oldDeps) {
         if (newDependents.has(depId)) {
           newDependents.get(depId)!.delete(id);
         }
       }
-
-      // Add to new dependencies
       for (const depId of newDeps) {
         if (!newDependents.has(depId)) {
           newDependents.set(depId, new Set());
         }
         newDependents.get(depId)!.add(id);
       }
-
-      // Create command for undo
-      const command = createCommand('updateFeature', {
-        before: oldFeature,
-        after: cloneFeature(updatedFeature),
-        featureId: id,
-      });
-
-      const newHistory: HistoryState = {
-        ...state.history,
-        undoStack: [...state.history.undoStack, command].slice(-state.history.maxHistorySize),
-        redoStack: [],
-      };
 
       return {
         features: newFeatures,
@@ -353,17 +377,14 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
     }
 
     set((state) => {
-      // Store feature for undo
-      const deletedFeature = cloneFeature(feature);
+      // Snapshot current state before mutation
+      const newHistory = pushSnapshot(state.history, state.features, `Delete ${feature.name}`);
 
-      // Remove from features array
       const newFeatures = state.features.filter((f) => f.id !== id);
 
-      // Remove from featureById map
       const newFeatureById = new Map(state.featureById);
       newFeatureById.delete(id);
 
-      // Update dependents map - remove this feature from dependencies
       const newDependents = new Map(state.dependents);
       const deps = getFeatureDependencies(feature);
       for (const depId of deps) {
@@ -371,8 +392,6 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
           newDependents.get(depId)!.delete(id);
         }
       }
-
-      // Also remove this feature's entry from dependents map
       newDependents.delete(id);
 
       // Mark all features that depended on this one as invalid
@@ -393,26 +412,11 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
         }
       }
 
-      // Remove from geometry cache
       const newGeometryCache = new Map(state.geometryCache);
       newGeometryCache.delete(id);
 
-      // Clear active/editing if this was the active feature
       const newActiveFeatureId = state.activeFeatureId === id ? null : state.activeFeatureId;
       const newEditingSketchId = state.editingSketchId === id ? null : state.editingSketchId;
-
-      // Create command for undo
-      const command = createCommand('deleteFeature', {
-        before: deletedFeature,
-        after: null,
-        featureId: id,
-      });
-
-      const newHistory: HistoryState = {
-        ...state.history,
-        undoStack: [...state.history.undoStack, command].slice(-state.history.maxHistorySize),
-        redoStack: [],
-      };
 
       return {
         features: newFeatures,
@@ -438,34 +442,22 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
     if (newIndex === currentIndex) return;
 
     set((state) => {
+      // Snapshot current state before mutation
+      const newHistory = pushSnapshot(state.history, state.features, 'Reorder feature');
+
       const newFeatures = [...state.features];
       const [removed] = newFeatures.splice(currentIndex, 1);
       newFeatures.splice(newIndex, 0, removed);
 
-      // Mark all features after the minimum index as dirty
       const minIndex = Math.min(currentIndex, newIndex);
       for (let i = minIndex; i < newFeatures.length; i++) {
         newFeatures[i] = { ...newFeatures[i], isDirty: true } as Feature;
       }
 
-      // Update featureById map with dirty flags
       const newFeatureById = new Map(state.featureById);
       for (let i = minIndex; i < newFeatures.length; i++) {
         newFeatureById.set(newFeatures[i].id, newFeatures[i]);
       }
-
-      // Create command for undo
-      const command = createCommand('reorderFeature', {
-        before: currentIndex,
-        after: newIndex,
-        featureId: id,
-      });
-
-      const newHistory: HistoryState = {
-        ...state.history,
-        undoStack: [...state.history.undoStack, command].slice(-state.history.maxHistorySize),
-        redoStack: [],
-      };
 
       return {
         features: newFeatures,
@@ -487,13 +479,13 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
     }
 
     const sketchFeature = feature as SketchFeature;
-    const oldElements = [...sketchFeature.elements];
-    const newElements = [...sketchFeature.elements, element];
 
     set((state) => {
+      const newHistory = pushSnapshot(state.history, state.features, 'Add sketch element');
+
       const updatedFeature: SketchFeature = {
         ...sketchFeature,
-        elements: newElements,
+        elements: [...sketchFeature.elements, element],
         isDirty: true,
       };
 
@@ -503,20 +495,6 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
 
       const newFeatureById = new Map(state.featureById);
       newFeatureById.set(featureId, updatedFeature);
-
-      // Create command for undo
-      const command = createCommand('addSketchElement', {
-        before: oldElements,
-        after: newElements,
-        featureId,
-        elementId: element.id,
-      });
-
-      const newHistory: HistoryState = {
-        ...state.history,
-        undoStack: [...state.history.undoStack, command].slice(-state.history.maxHistorySize),
-        redoStack: [],
-      };
 
       return {
         features: newFeatures,
@@ -536,22 +514,19 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
     }
 
     const sketchFeature = feature as SketchFeature;
-    const elementIndex = sketchFeature.elements.findIndex((e) => e.id === elementId);
-
-    if (elementIndex === -1) {
+    if (!sketchFeature.elements.some((e) => e.id === elementId)) {
       console.warn(`Sketch element not found: ${elementId}`);
       return;
     }
 
-    const oldElements = [...sketchFeature.elements];
-    const newElements = sketchFeature.elements.map((e) =>
-      e.id === elementId ? { ...e, ...updates } as SketchElement : e
-    );
-
     set((state) => {
+      const newHistory = pushSnapshot(state.history, state.features, 'Update sketch element');
+
       const updatedFeature: SketchFeature = {
         ...sketchFeature,
-        elements: newElements,
+        elements: sketchFeature.elements.map((e) =>
+          e.id === elementId ? { ...e, ...updates } as SketchElement : e
+        ),
         isDirty: true,
       };
 
@@ -561,20 +536,6 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
 
       const newFeatureById = new Map(state.featureById);
       newFeatureById.set(featureId, updatedFeature);
-
-      // Create command for undo
-      const command = createCommand('updateSketchElement', {
-        before: oldElements,
-        after: newElements,
-        featureId,
-        elementId,
-      });
-
-      const newHistory: HistoryState = {
-        ...state.history,
-        undoStack: [...state.history.undoStack, command].slice(-state.history.maxHistorySize),
-        redoStack: [],
-      };
 
       return {
         features: newFeatures,
@@ -593,14 +554,13 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
       return;
     }
 
-    const sketchFeature = feature as SketchFeature;
-    const oldElements = [...sketchFeature.elements];
-    const newElements = sketchFeature.elements.filter((e) => e.id !== elementId);
-
     set((state) => {
+      const newHistory = pushSnapshot(state.history, state.features, 'Delete sketch element');
+
+      const sketchFeature = feature as SketchFeature;
       const updatedFeature: SketchFeature = {
         ...sketchFeature,
-        elements: newElements,
+        elements: sketchFeature.elements.filter((e) => e.id !== elementId),
         isDirty: true,
       };
 
@@ -610,20 +570,6 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
 
       const newFeatureById = new Map(state.featureById);
       newFeatureById.set(featureId, updatedFeature);
-
-      // Create command for undo
-      const command = createCommand('deleteSketchElement', {
-        before: oldElements,
-        after: newElements,
-        featureId,
-        elementId,
-      });
-
-      const newHistory: HistoryState = {
-        ...state.history,
-        undoStack: [...state.history.undoStack, command].slice(-state.history.maxHistorySize),
-        redoStack: [],
-      };
 
       return {
         features: newFeatures,
@@ -770,279 +716,120 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
 
   undo: () => {
     const state = get();
-    const { undoStack, redoStack, maxHistorySize } = state.history;
+    const { currentSnapshotIndex } = state.history;
 
-    if (undoStack.length === 0) return;
-
-    const command = undoStack[undoStack.length - 1];
-    const newUndoStack = undoStack.slice(0, -1);
-    const newRedoStack = [...redoStack, command].slice(-maxHistorySize);
+    if (currentSnapshotIndex < 0) return;
 
     set((state) => {
-      let newFeatures = [...state.features];
-      let newFeatureById = new Map(state.featureById);
-      let newDependents = new Map(state.dependents);
+      const newIndex = state.history.currentSnapshotIndex - 1;
 
-      switch (command.type) {
-        case 'addFeature': {
-          // Undo add = delete
-          const featureId = command.payload.featureId!;
-          const feature = newFeatureById.get(featureId);
-          if (feature) {
-            newFeatures = newFeatures.filter((f) => f.id !== featureId);
-            newFeatureById.delete(featureId);
-
-            // Clean up dependents
-            const deps = getFeatureDependencies(feature);
-            for (const depId of deps) {
-              if (newDependents.has(depId)) {
-                newDependents.get(depId)!.delete(featureId);
-              }
-            }
-            newDependents.delete(featureId);
-          }
-          break;
-        }
-
-        case 'deleteFeature': {
-          // Undo delete = restore
-          const feature = command.payload.before as Feature;
-          newFeatures.push(feature);
-          newFeatureById.set(feature.id, feature);
-
-          // Restore dependencies
-          const deps = getFeatureDependencies(feature);
-          for (const depId of deps) {
-            if (!newDependents.has(depId)) {
-              newDependents.set(depId, new Set());
-            }
-            newDependents.get(depId)!.add(feature.id);
-          }
-          break;
-        }
-
-        case 'updateFeature': {
-          // Undo update = restore previous state
-          const featureId = command.payload.featureId!;
-          const oldFeature = command.payload.before as Feature;
-          const currentFeature = newFeatureById.get(featureId);
-
-          const idx = newFeatures.findIndex((f) => f.id === featureId);
-          if (idx >= 0) {
-            newFeatures[idx] = oldFeature;
-          }
-          newFeatureById.set(featureId, oldFeature);
-
-          // Update dependents if dependencies changed
-          if (currentFeature) {
-            const oldDeps = getFeatureDependencies(currentFeature);
-            for (const depId of oldDeps) {
-              if (newDependents.has(depId)) {
-                newDependents.get(depId)!.delete(featureId);
-              }
-            }
-          }
-          const newDeps = getFeatureDependencies(oldFeature);
-          for (const depId of newDeps) {
-            if (!newDependents.has(depId)) {
-              newDependents.set(depId, new Set());
-            }
-            newDependents.get(depId)!.add(featureId);
-          }
-          break;
-        }
-
-        case 'reorderFeature': {
-          // Undo reorder = move back to original position
-          const featureId = command.payload.featureId!;
-          const oldIndex = command.payload.before as number;
-          const currentIndex = newFeatures.findIndex((f) => f.id === featureId);
-
-          if (currentIndex >= 0 && oldIndex !== currentIndex) {
-            const [removed] = newFeatures.splice(currentIndex, 1);
-            newFeatures.splice(oldIndex, 0, removed);
-          }
-          break;
-        }
-
-        case 'addSketchElement':
-        case 'updateSketchElement':
-        case 'deleteSketchElement': {
-          // Restore previous elements array
-          const featureId = command.payload.featureId!;
-          const oldElements = command.payload.before as SketchElement[];
-          const feature = newFeatureById.get(featureId);
-
-          if (feature && feature.type === 'sketch') {
-            const updatedFeature: SketchFeature = {
-              ...(feature as SketchFeature),
-              elements: oldElements,
-              isDirty: true,
-            };
-            const idx = newFeatures.findIndex((f) => f.id === featureId);
-            if (idx >= 0) {
-              newFeatures[idx] = updatedFeature;
-            }
-            newFeatureById.set(featureId, updatedFeature);
-          }
-          break;
-        }
+      if (newIndex < 0) {
+        // Undo to empty state (before first snapshot)
+        return {
+          features: [],
+          featureById: new Map(),
+          dependents: new Map(),
+          geometryCache: new Map(),
+          finalShape: null,
+          activeFeatureId: null,
+          editingSketchId: null,
+          history: {
+            ...state.history,
+            currentSnapshotIndex: -1,
+          },
+        };
       }
 
+      const restored = restoreSnapshot(state.history.snapshots, newIndex);
       return {
-        features: newFeatures,
-        featureById: newFeatureById,
-        dependents: newDependents,
+        ...restored,
         history: {
           ...state.history,
-          undoStack: newUndoStack,
-          redoStack: newRedoStack,
+          currentSnapshotIndex: newIndex,
         },
       };
     });
   },
 
   redo: () => {
-    const state = get();
-    const { undoStack, redoStack, maxHistorySize } = state.history;
+    const { history } = get();
 
-    if (redoStack.length === 0) return;
-
-    const command = redoStack[redoStack.length - 1];
-    const newRedoStack = redoStack.slice(0, -1);
-    const newUndoStack = [...undoStack, command].slice(-maxHistorySize);
+    if (history.currentSnapshotIndex >= history.snapshots.length - 1) return;
 
     set((state) => {
-      let newFeatures = [...state.features];
-      let newFeatureById = new Map(state.featureById);
-      let newDependents = new Map(state.dependents);
-
-      switch (command.type) {
-        case 'addFeature': {
-          // Redo add = add again
-          const feature = command.payload.after as Feature;
-          newFeatures.push(feature);
-          newFeatureById.set(feature.id, feature);
-
-          // Add dependencies
-          const deps = getFeatureDependencies(feature);
-          for (const depId of deps) {
-            if (!newDependents.has(depId)) {
-              newDependents.set(depId, new Set());
-            }
-            newDependents.get(depId)!.add(feature.id);
-          }
-          break;
-        }
-
-        case 'deleteFeature': {
-          // Redo delete = delete again
-          const featureId = command.payload.featureId!;
-          const feature = newFeatureById.get(featureId);
-
-          if (feature) {
-            newFeatures = newFeatures.filter((f) => f.id !== featureId);
-            newFeatureById.delete(featureId);
-
-            // Clean up dependents
-            const deps = getFeatureDependencies(feature);
-            for (const depId of deps) {
-              if (newDependents.has(depId)) {
-                newDependents.get(depId)!.delete(featureId);
-              }
-            }
-            newDependents.delete(featureId);
-          }
-          break;
-        }
-
-        case 'updateFeature': {
-          // Redo update = apply new state
-          const featureId = command.payload.featureId!;
-          const newFeature = command.payload.after as Feature;
-          const currentFeature = newFeatureById.get(featureId);
-
-          const idx = newFeatures.findIndex((f) => f.id === featureId);
-          if (idx >= 0) {
-            newFeatures[idx] = newFeature;
-          }
-          newFeatureById.set(featureId, newFeature);
-
-          // Update dependents
-          if (currentFeature) {
-            const oldDeps = getFeatureDependencies(currentFeature);
-            for (const depId of oldDeps) {
-              if (newDependents.has(depId)) {
-                newDependents.get(depId)!.delete(featureId);
-              }
-            }
-          }
-          const newDeps = getFeatureDependencies(newFeature);
-          for (const depId of newDeps) {
-            if (!newDependents.has(depId)) {
-              newDependents.set(depId, new Set());
-            }
-            newDependents.get(depId)!.add(featureId);
-          }
-          break;
-        }
-
-        case 'reorderFeature': {
-          // Redo reorder = move to new position
-          const featureId = command.payload.featureId!;
-          const newIndex = command.payload.after as number;
-          const currentIndex = newFeatures.findIndex((f) => f.id === featureId);
-
-          if (currentIndex >= 0 && newIndex !== currentIndex) {
-            const [removed] = newFeatures.splice(currentIndex, 1);
-            newFeatures.splice(newIndex, 0, removed);
-          }
-          break;
-        }
-
-        case 'addSketchElement':
-        case 'updateSketchElement':
-        case 'deleteSketchElement': {
-          // Apply new elements array
-          const featureId = command.payload.featureId!;
-          const newElements = command.payload.after as SketchElement[];
-          const feature = newFeatureById.get(featureId);
-
-          if (feature && feature.type === 'sketch') {
-            const updatedFeature: SketchFeature = {
-              ...(feature as SketchFeature),
-              elements: newElements,
-              isDirty: true,
-            };
-            const idx = newFeatures.findIndex((f) => f.id === featureId);
-            if (idx >= 0) {
-              newFeatures[idx] = updatedFeature;
-            }
-            newFeatureById.set(featureId, updatedFeature);
-          }
-          break;
-        }
-      }
-
+      const newIndex = state.history.currentSnapshotIndex + 1;
+      const restored = restoreSnapshot(state.history.snapshots, newIndex);
       return {
-        features: newFeatures,
-        featureById: newFeatureById,
-        dependents: newDependents,
+        ...restored,
         history: {
           ...state.history,
-          undoStack: newUndoStack,
-          redoStack: newRedoStack,
+          currentSnapshotIndex: newIndex,
         },
       };
     });
   },
 
   canUndo: () => {
-    return get().history.undoStack.length > 0;
+    return get().history.currentSnapshotIndex >= 0;
   },
 
   canRedo: () => {
-    return get().history.redoStack.length > 0;
+    const { snapshots, currentSnapshotIndex } = get().history;
+    return currentSnapshotIndex < snapshots.length - 1;
+  },
+
+  rollbackToFeature: (featureId) => {
+    const state = get();
+    const { snapshots } = state.history;
+
+    // Search snapshots in reverse for the last one containing this feature as the final feature
+    let targetIndex = -1;
+    for (let i = snapshots.length - 1; i >= 0; i--) {
+      const snap = snapshots[i];
+      const lastFeature = snap.features[snap.features.length - 1];
+      if (lastFeature && lastFeature.id === featureId) {
+        targetIndex = i;
+        break;
+      }
+    }
+
+    if (targetIndex === -1) {
+      // Fallback: find any snapshot containing the feature
+      for (let i = snapshots.length - 1; i >= 0; i--) {
+        if (snapshots[i].features.some((f) => f.id === featureId)) {
+          targetIndex = i;
+          break;
+        }
+      }
+    }
+
+    if (targetIndex === -1) {
+      console.warn(`No snapshot found containing feature: ${featureId}`);
+      return;
+    }
+
+    get().rollbackToSnapshot(targetIndex);
+  },
+
+  rollbackToSnapshot: (index) => {
+    const state = get();
+    const { snapshots } = state.history;
+
+    if (index < 0 || index >= snapshots.length) {
+      console.warn(`Invalid snapshot index: ${index}`);
+      return;
+    }
+
+    set((state) => {
+      const restored = restoreSnapshot(state.history.snapshots, index);
+      return {
+        ...restored,
+        history: {
+          ...state.history,
+          currentSnapshotIndex: index,
+        },
+      };
+    });
   },
 
   // ============ UTILITY ============
@@ -1103,12 +890,12 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
       id: constraintId,
     };
 
-    const newConstraints = [...sketchFeature.constraints, newConstraint];
-
     set((state) => {
+      const newHistory = pushSnapshot(state.history, state.features, 'Add constraint');
+
       const updatedFeature: SketchFeature = {
         ...sketchFeature,
-        constraints: newConstraints,
+        constraints: [...sketchFeature.constraints, newConstraint],
         isDirty: true,
       };
 
@@ -1118,19 +905,6 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
 
       const newFeatureById = new Map(state.featureById);
       newFeatureById.set(sketchId, updatedFeature);
-
-      // Create command for undo
-      const command = createCommand('updateFeature', {
-        before: cloneFeature(sketchFeature),
-        after: cloneFeature(updatedFeature),
-        featureId: sketchId,
-      });
-
-      const newHistory: HistoryState = {
-        ...state.history,
-        undoStack: [...state.history.undoStack, command].slice(-state.history.maxHistorySize),
-        redoStack: [],
-      };
 
       return {
         features: newFeatures,
@@ -1150,12 +924,13 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
     }
 
     const sketchFeature = feature as SketchFeature;
-    const newConstraints = sketchFeature.constraints.filter((c) => c.id !== constraintId);
 
     set((state) => {
+      const newHistory = pushSnapshot(state.history, state.features, 'Remove constraint');
+
       const updatedFeature: SketchFeature = {
         ...sketchFeature,
-        constraints: newConstraints,
+        constraints: sketchFeature.constraints.filter((c) => c.id !== constraintId),
         isDirty: true,
       };
 
@@ -1165,19 +940,6 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
 
       const newFeatureById = new Map(state.featureById);
       newFeatureById.set(sketchId, updatedFeature);
-
-      // Create command for undo
-      const command = createCommand('updateFeature', {
-        before: cloneFeature(sketchFeature),
-        after: cloneFeature(updatedFeature),
-        featureId: sketchId,
-      });
-
-      const newHistory: HistoryState = {
-        ...state.history,
-        undoStack: [...state.history.undoStack, command].slice(-state.history.maxHistorySize),
-        redoStack: [],
-      };
 
       return {
         features: newFeatures,
@@ -1197,14 +959,15 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
     }
 
     const sketchFeature = feature as SketchFeature;
-    const newConstraints = sketchFeature.constraints.map((c) =>
-      c.id === constraintId ? { ...c, value } : c
-    );
 
     set((state) => {
+      const newHistory = pushSnapshot(state.history, state.features, 'Update constraint');
+
       const updatedFeature: SketchFeature = {
         ...sketchFeature,
-        constraints: newConstraints,
+        constraints: sketchFeature.constraints.map((c) =>
+          c.id === constraintId ? { ...c, value } : c
+        ),
         isDirty: true,
       };
 
@@ -1214,19 +977,6 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
 
       const newFeatureById = new Map(state.featureById);
       newFeatureById.set(sketchId, updatedFeature);
-
-      // Create command for undo
-      const command = createCommand('updateFeature', {
-        before: cloneFeature(sketchFeature),
-        after: cloneFeature(updatedFeature),
-        featureId: sketchId,
-      });
-
-      const newHistory: HistoryState = {
-        ...state.history,
-        undoStack: [...state.history.undoStack, command].slice(-state.history.maxHistorySize),
-        redoStack: [],
-      };
 
       return {
         features: newFeatures,
@@ -1268,6 +1018,8 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
 
       // Step 4: Update sketch with solved elements
       set((state) => {
+        const newHistory = pushSnapshot(state.history, state.features, 'Solve constraints');
+
         const updatedFeature: SketchFeature = {
           ...sketchFeature,
           elements: updatedElements,
@@ -1280,19 +1032,6 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
 
         const newFeatureById = new Map(state.featureById);
         newFeatureById.set(sketchId, updatedFeature);
-
-        // Create command for undo
-        const command = createCommand('updateFeature', {
-          before: cloneFeature(sketchFeature),
-          after: cloneFeature(updatedFeature),
-          featureId: sketchId,
-        });
-
-        const newHistory: HistoryState = {
-          ...state.history,
-          undoStack: [...state.history.undoStack, command].slice(-state.history.maxHistorySize),
-          redoStack: [],
-        };
 
         return {
           features: newFeatures,
@@ -1350,7 +1089,7 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
   saveToLocalStorage: () => {
     try {
       const state = get();
-      const json = serializeProject(state.features);
+      const json = serializeProject(state.features, state.history);
       localStorage.setItem(STORAGE_KEY, json);
       console.log('[Feature Store] Project saved to localStorage');
       return true;
@@ -1379,6 +1118,19 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
       // Rebuild derived state from features
       const { featureById, dependents } = rebuildDerivedState(data.features);
 
+      // Restore snapshots if available (v2), otherwise start fresh
+      const history: HistoryState = data.snapshots && data.currentSnapshotIndex !== undefined
+        ? {
+            snapshots: data.snapshots,
+            currentSnapshotIndex: data.currentSnapshotIndex,
+            maxSnapshots: 30,
+          }
+        : {
+            snapshots: [],
+            currentSnapshotIndex: -1,
+            maxSnapshots: 30,
+          };
+
       set({
         features: data.features,
         featureById,
@@ -1387,11 +1139,7 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
         editingSketchId: null,
         geometryCache: new Map(),
         finalShape: null,
-        history: {
-          undoStack: [],
-          redoStack: [],
-          maxHistorySize: 50,
-        },
+        history,
       });
 
       console.log(`[Feature Store] Loaded project with ${data.features.length} features`);
@@ -1415,9 +1163,9 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
       geometryCache: new Map(),
       finalShape: null,
       history: {
-        undoStack: [],
-        redoStack: [],
-        maxHistorySize: 50,
+        snapshots: [],
+        currentSnapshotIndex: -1,
+        maxSnapshots: 30,
       },
     });
     console.log('[Feature Store] Project cleared');

@@ -337,34 +337,19 @@ export type Feature =
   | FilletFeature
   | ShellFeature;
 
-// ============ HISTORY/COMMAND TYPES ============
+// ============ HISTORY/SNAPSHOT TYPES ============
 
-export type CommandType =
-  | 'addFeature'
-  | 'deleteFeature'
-  | 'updateFeature'
-  | 'reorderFeature'
-  | 'addSketchElement'
-  | 'updateSketchElement'
-  | 'deleteSketchElement';
-
-export interface Command {
+export interface Snapshot {
   id: string;
-  type: CommandType;
+  label: string;
   timestamp: number;
-  // Stores state needed for undo/redo
-  payload: {
-    before: unknown;               // State before command
-    after: unknown;                // State after command
-    featureId?: string;            // Affected feature
-    elementId?: string;            // Affected element (for sketch commands)
-  };
+  features: Feature[];
 }
 
 export interface HistoryState {
-  undoStack: Command[];
-  redoStack: Command[];
-  maxHistorySize: number;          // Limit memory usage
+  snapshots: Snapshot[];
+  currentSnapshotIndex: number;
+  maxSnapshots: number;
 }
 
 // ============ FEATURE STORE STATE ============

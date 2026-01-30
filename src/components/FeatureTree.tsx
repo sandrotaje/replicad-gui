@@ -441,6 +441,8 @@ interface ContextMenuProps {
   onDelete: () => void;
   onEdit: () => void;
   onEditParameters?: () => void;
+  onRollback?: () => void;
+  rollbackDisabled?: boolean;
 }
 
 const ContextMenu: React.FC<ContextMenuProps> = ({
@@ -451,6 +453,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
   onDelete,
   onEdit,
   onEditParameters,
+  onRollback,
+  rollbackDisabled,
 }) => {
   const menuStyle: React.CSSProperties = {
     position: 'fixed',
@@ -527,6 +531,32 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
             <span>Edit Parameters</span>
           </div>
         )}
+        {onRollback && (
+          <div
+            style={{
+              ...menuItemStyle,
+              opacity: rollbackDisabled ? 0.5 : 1,
+              cursor: rollbackDisabled ? 'not-allowed' : 'pointer',
+            }}
+            onClick={() => {
+              if (!rollbackDisabled) {
+                onRollback();
+                onClose();
+              }
+            }}
+            onMouseEnter={(e) => {
+              if (!rollbackDisabled) {
+                e.currentTarget.style.backgroundColor = '#313244';
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+            }}
+          >
+            <span>⏪</span>
+            <span>Rollback to here</span>
+          </div>
+        )}
         <div
           style={{ ...menuItemStyle, color: '#f38ba8' }}
           onClick={() => {
@@ -562,6 +592,7 @@ export const FeatureTree: React.FC = () => {
   const redo = useFeatureStore((state) => state.redo);
   const canUndo = useFeatureStore((state) => state.canUndo);
   const canRedo = useFeatureStore((state) => state.canRedo);
+  const rollbackToFeature = useFeatureStore((state) => state.rollbackToFeature);
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
@@ -673,6 +704,12 @@ export const FeatureTree: React.FC = () => {
       startEditingSketch(contextMenu.feature.id);
     }
   }, [contextMenu, startEditingSketch]);
+
+  const handleRollbackFromContext = useCallback(() => {
+    if (contextMenu) {
+      rollbackToFeature(contextMenu.feature.id);
+    }
+  }, [contextMenu, rollbackToFeature]);
 
   // Button styles
   const historyButtonStyle = (disabled: boolean): React.CSSProperties => ({
@@ -859,6 +896,8 @@ export const FeatureTree: React.FC = () => {
           onDelete={handleDeleteFromContext}
           onEdit={handleEditFromContext}
           onEditParameters={handleEditParameters}
+          onRollback={handleRollbackFromContext}
+          rollbackDisabled={editingSketchId !== null}
         />
       )}
 
