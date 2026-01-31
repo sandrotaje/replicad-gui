@@ -137,6 +137,9 @@ interface FeatureStoreActions {
   getFeatureByName: (name: string) => Feature | undefined;
   generateUniqueName: (type: FeatureType) => string;
 
+  // Sketch 3D visibility
+  toggleSketch3DVisibility: (featureId: string) => void;
+
   // Cache management
   setFinalShape: (shape: ShapeData | null) => void;
   setGeometryCache: (featureId: string, geometry: unknown) => void;
@@ -1082,6 +1085,29 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
         };
       });
     }
+  },
+
+  // ============ SKETCH 3D VISIBILITY ============
+
+  toggleSketch3DVisibility: (featureId) => {
+    const state = get();
+    const feature = state.featureById.get(featureId);
+    if (!feature || feature.type !== 'sketch') return;
+
+    const sketch = feature as SketchFeature;
+    const updatedFeature: SketchFeature = {
+      ...sketch,
+      showIn3D: !sketch.showIn3D,
+    };
+
+    set((state) => {
+      const newFeatures = state.features.map((f) =>
+        f.id === featureId ? updatedFeature : f
+      );
+      const newFeatureById = new Map(state.featureById);
+      newFeatureById.set(featureId, updatedFeature);
+      return { features: newFeatures, featureById: newFeatureById };
+    });
   },
 
   // ============ CACHE MANAGEMENT ============

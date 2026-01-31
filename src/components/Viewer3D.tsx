@@ -4,6 +4,7 @@ import { useStore } from '../store/useStore';
 import { useMemo, useCallback, useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import type { IndividualFace, IndividualEdge } from '../types';
+import { SketchOverlay3D } from './SketchOverlay3D';
 
 // Colors
 const FACE_COLOR = '#89b4fa';
@@ -425,6 +426,7 @@ function Scene() {
 
       {shapeData && renderFaces()}
       {shapeData && renderEdges()}
+      <SketchOverlay3D />
 
       <mesh visible={false} onClick={handleBackgroundClick} position={[0, -0.1, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[10000, 10000]} />

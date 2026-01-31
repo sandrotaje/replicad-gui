@@ -304,6 +304,7 @@ export interface SketchFeature extends FeatureBase {
   closedProfiles?: ClosedProfileGroup[];  // Detected closed profiles from chained elements
   openPaths?: OpenPathGroup[];            // Detected open paths (for sweep paths)
   constraints: Constraint[];       // Geometric constraints
+  showIn3D?: boolean;              // Show sketch wireframe in 3D viewer
 }
 
 // Extrusion Feature - extrudes a sketch

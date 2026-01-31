@@ -255,6 +255,7 @@ const FeatureItem: React.FC<FeatureItemProps> = ({
   onDoubleClick,
   onContextMenu,
 }) => {
+  const toggleSketch3DVisibility = useFeatureStore((state) => state.toggleSketch3DVisibility);
   const getItemStyle = (): React.CSSProperties => {
     let backgroundColor = 'transparent';
     let borderLeftColor = 'transparent';
@@ -383,6 +384,23 @@ const FeatureItem: React.FC<FeatureItemProps> = ({
 
       {/* Status indicators */}
       <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+        {feature.type === 'sketch' && (
+          <span
+            style={{
+              cursor: 'pointer',
+              fontSize: '12px',
+              opacity: (feature as SketchFeature).showIn3D ? 1 : 0.3,
+              color: '#89b4fa',
+            }}
+            title={`${(feature as SketchFeature).showIn3D ? 'Hide' : 'Show'} sketch in 3D`}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleSketch3DVisibility(feature.id);
+            }}
+          >
+            👁
+          </span>
+        )}
         {!feature.isValid && (
           <span
             style={{ color: '#f38ba8', fontSize: '12px' }}
