@@ -12,6 +12,9 @@ import type {
   FilletFeature,
   ShellFeature,
   SweepFeature,
+  LoftFeature,
+  LinearPatternFeature,
+  PolarPatternFeature,
 } from '../types';
 
 // ============ PROJECT MENU COMPONENT ============
@@ -216,6 +219,12 @@ const FeatureIcon: React.FC<FeatureIconProps> = ({ type }) => {
       return <span style={iconStyle} title="Sweep">🔀</span>;
     case 'shell':
       return <span style={iconStyle} title="Shell">🥚</span>;
+    case 'loft':
+      return <span style={iconStyle} title="Loft">🔄</span>;
+    case 'linearPattern':
+      return <span style={iconStyle} title="Linear Pattern">📏</span>;
+    case 'polarPattern':
+      return <span style={iconStyle} title="Polar Pattern">🔃</span>;
     default:
       // Future feature types can be added here
       return <span style={iconStyle}>•</span>;
@@ -315,6 +324,18 @@ const FeatureItem: React.FC<FeatureItemProps> = ({
         const shell = feature as ShellFeature;
         const facesRemoved = shell.faceIndices.length;
         return `Thickness: ${shell.thickness}${facesRemoved > 0 ? `, ${facesRemoved} face${facesRemoved !== 1 ? 's' : ''} removed` : ''}`;
+      }
+      case 'loft': {
+        const loft = feature as LoftFeature;
+        return `${loft.profileSketchIds.length} profiles, ${loft.operation}`;
+      }
+      case 'linearPattern': {
+        const lp = feature as LinearPatternFeature;
+        return `${lp.count} copies, spacing: ${lp.spacing}`;
+      }
+      case 'polarPattern': {
+        const pp = feature as PolarPatternFeature;
+        return `${pp.count} copies, ${pp.totalAngle}°`;
       }
       default:
         return '';
@@ -442,6 +463,26 @@ function calculateDepth(feature: Feature, allFeatures: Feature[]): number {
     const target = allFeatures.find((f) => f.id === targetId);
     if (target) {
       return calculateDepth(target, allFeatures);
+    }
+    return 0;
+  }
+
+  // Loft depends on multiple sketches - use the first profile sketch depth
+  if (feature.type === 'loft') {
+    const profileIds = (feature as LoftFeature).profileSketchIds;
+    if (profileIds.length > 0) {
+      const firstSketch = allFeatures.find(f => f.id === profileIds[0]);
+      if (firstSketch) return calculateDepth(firstSketch, allFeatures);
+    }
+    return 0;
+  }
+
+  // Linear and polar patterns depend on their source feature
+  if (feature.type === 'linearPattern' || feature.type === 'polarPattern') {
+    const sourceId = (feature as LinearPatternFeature | PolarPatternFeature).sourceFeatureId;
+    const source = allFeatures.find((f) => f.id === sourceId);
+    if (source) {
+      return calculateDepth(source, allFeatures);
     }
     return 0;
   }
@@ -620,7 +661,7 @@ export const FeatureTree: React.FC = () => {
   } | null>(null);
 
   // Edit dialog state
-  const [editingFeature, setEditingFeature] = useState<ExtrusionFeature | CutFeature | ShellFeature | null>(null);
+  const [editingFeature, setEditingFeature] = useState<ExtrusionFeature | CutFeature | ShellFeature | LoftFeature | LinearPatternFeature | PolarPatternFeature | null>(null);
 
   // Bevel edit dialog state
   const [editingBevelFeature, setEditingBevelFeature] = useState<ChamferFeature | FilletFeature | null>(null);
@@ -646,8 +687,8 @@ export const FeatureTree: React.FC = () => {
     (feature: Feature) => {
       if (feature.type === 'sketch') {
         startEditingSketch(feature.id);
-      } else if (feature.type === 'extrusion' || feature.type === 'cut' || feature.type === 'shell') {
-        setEditingFeature(feature as ExtrusionFeature | CutFeature | ShellFeature);
+      } else if (feature.type === 'extrusion' || feature.type === 'cut' || feature.type === 'shell' || feature.type === 'loft' || feature.type === 'linearPattern' || feature.type === 'polarPattern') {
+        setEditingFeature(feature as ExtrusionFeature | CutFeature | ShellFeature | LoftFeature | LinearPatternFeature | PolarPatternFeature);
       } else if (feature.type === 'chamfer' || feature.type === 'fillet') {
         setEditingBevelFeature(feature as ChamferFeature | FilletFeature);
       } else if (feature.type === 'sweep') {
@@ -659,8 +700,8 @@ export const FeatureTree: React.FC = () => {
 
   const handleEditParameters = useCallback(() => {
     if (contextMenu) {
-      if (contextMenu.feature.type === 'extrusion' || contextMenu.feature.type === 'cut' || contextMenu.feature.type === 'shell') {
-        setEditingFeature(contextMenu.feature as ExtrusionFeature | CutFeature | ShellFeature);
+      if (contextMenu.feature.type === 'extrusion' || contextMenu.feature.type === 'cut' || contextMenu.feature.type === 'shell' || contextMenu.feature.type === 'loft' || contextMenu.feature.type === 'linearPattern' || contextMenu.feature.type === 'polarPattern') {
+        setEditingFeature(contextMenu.feature as ExtrusionFeature | CutFeature | ShellFeature | LoftFeature | LinearPatternFeature | PolarPatternFeature);
       } else if (contextMenu.feature.type === 'chamfer' || contextMenu.feature.type === 'fillet') {
         setEditingBevelFeature(contextMenu.feature as ChamferFeature | FilletFeature);
       } else if (contextMenu.feature.type === 'sweep') {
@@ -670,7 +711,7 @@ export const FeatureTree: React.FC = () => {
   }, [contextMenu]);
 
   const handleSaveFeatureEdit = useCallback(
-    (updates: Partial<ExtrusionFeature | CutFeature | ShellFeature>) => {
+    (updates: Partial<ExtrusionFeature | CutFeature | ShellFeature | LoftFeature | LinearPatternFeature | PolarPatternFeature>) => {
       if (editingFeature) {
         updateFeature(editingFeature.id, updates);
         setEditingFeature(null);

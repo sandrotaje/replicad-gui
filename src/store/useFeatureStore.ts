@@ -183,6 +183,15 @@ function getFeatureDependencies(feature: Feature): string[] {
       // Chamfer, fillet, and shell depend on their target feature
       deps.push(feature.targetFeatureId);
       break;
+
+    case 'loft':
+      deps.push(...feature.profileSketchIds);
+      break;
+
+    case 'linearPattern':
+    case 'polarPattern':
+      deps.push(feature.sourceFeatureId);
+      break;
   }
 
   return deps;
@@ -857,6 +866,9 @@ export const useFeatureStore = create<FeatureStoreState & FeatureStoreActions>((
       revolve: 'Revolve',
       shell: 'Shell',
       sweep: 'Sweep',
+      loft: 'Loft',
+      linearPattern: 'Linear Pattern',
+      polarPattern: 'Polar Pattern',
     };
 
     const baseName = typeNames[type] || type;

@@ -151,8 +151,8 @@ export function extractSolverPrimitives(elements: SketchElement[]): {
       case 'spline': {
         const spline = element as SplineElement;
         // Each control point becomes a solver point
-        spline.points.forEach((point) => {
-          addPoint(element.id, 'control', point.x, point.y);
+        spline.points.forEach((point, index) => {
+          addPoint(element.id, `control${index}`, point.x, point.y);
         });
         // Note: Spline segments could be represented as lines between control points,
         // but for a proper spline solver we'd need curve constraints

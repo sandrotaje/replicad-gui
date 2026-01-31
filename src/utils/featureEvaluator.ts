@@ -14,6 +14,9 @@ import type {
   FilletFeature,
   ShellFeature,
   SweepFeature,
+  LoftFeature,
+  LinearPatternFeature,
+  PolarPatternFeature,
   SketchElement,
   Point,
   ShapeData,
@@ -87,6 +90,15 @@ function getFeatureDependencies(feature: Feature): string[] {
     case 'shell':
       // Chamfer/Fillet/Shell depends on target feature
       deps.push(feature.targetFeatureId);
+      break;
+
+    case 'loft':
+      deps.push(...feature.profileSketchIds);
+      break;
+
+    case 'linearPattern':
+    case 'polarPattern':
+      deps.push(feature.sourceFeatureId);
       break;
   }
 
@@ -426,6 +438,7 @@ export class FeatureEvaluator {
 
     const depth = extrusion.direction === 'reverse' ? -extrusion.depth : extrusion.depth;
     const depthStr = depth.toFixed(2);
+    const extrudeOptions = extrusion.direction === 'symmetric' ? `, { symmetric: true }` : '';
 
     // Get centers for all extrudable elements (for face sketches)
     const centers = this.getExtrudableElementCenters(sketch);
@@ -461,13 +474,18 @@ export class FeatureEvaluator {
 
         if (sketch.reference.type === 'standard') {
           const plane = sketch.reference.plane;
-          sketchOnCode = `${sketchVarName}[${i}].sketchOnPlane("${plane}")`;
+          const offset = sketch.reference.offset;
+          if (offset !== 0) {
+            sketchOnCode = `${sketchVarName}[${i}].sketchOnPlane("${plane}", ${offset.toFixed(2)})`;
+          } else {
+            sketchOnCode = `${sketchVarName}[${i}].sketchOnPlane("${plane}")`;
+          }
         } else {
           const faceIndex = sketch.reference.faceIndex;
           sketchOnCode = `sketchOnFace(${sketchVarName}[${i}], ${resultVarName}, ${faceIndex}, ${center.x.toFixed(2)}, ${center.y.toFixed(2)})`;
         }
 
-        const extrudeCode = `${sketchOnCode}.extrude(${depthStr})`;
+        const extrudeCode = `${sketchOnCode}.extrude(${depthStr}${extrudeOptions})`;
 
         if (i === 0) {
           // First element
@@ -592,7 +610,12 @@ export class FeatureEvaluator {
 
         if (sketch.reference.type === 'standard') {
           const plane = sketch.reference.plane;
-          sketchOnCode = `${sketchVarName}[${i}].sketchOnPlane("${plane}")`;
+          const offset = sketch.reference.offset;
+          if (offset !== 0) {
+            sketchOnCode = `${sketchVarName}[${i}].sketchOnPlane("${plane}", ${offset.toFixed(2)})`;
+          } else {
+            sketchOnCode = `${sketchVarName}[${i}].sketchOnPlane("${plane}")`;
+          }
         } else {
           const faceIndex = sketch.reference.faceIndex;
           sketchOnCode = `sketchOnFace(${sketchVarName}[${i}], ${resultVarName}, ${faceIndex}, ${center.x.toFixed(2)}, ${center.y.toFixed(2)})`;
@@ -665,6 +688,143 @@ export class FeatureEvaluator {
 
     const faceSelectors = shell.faceIndices.map((idx) => `${resultVarName}.faces[${idx}]`).join(', ');
     return `${resultVarName} = ${resultVarName}.shell(${shell.thickness.toFixed(2)}, (f) => f.inList([${faceSelectors}]));`;
+  }
+
+  /**
+   * Generate replicad code for a loft feature
+   */
+  generateLoftCode(
+    loft: LoftFeature,
+    profileVarNames: string[],
+    resultVarName: string,
+    features: Feature[],
+    declareResult: boolean = false
+  ): string {
+    const lines: string[] = [];
+
+    const wireVars: string[] = [];
+    for (let i = 0; i < loft.profileSketchIds.length; i++) {
+      const sketch = features.find(f => f.id === loft.profileSketchIds[i]) as SketchFeature | undefined;
+      if (!sketch) continue;
+      const varName = profileVarNames[i];
+      const wireVar = `loft_wire_${i}`;
+      wireVars.push(wireVar);
+
+      if (sketch.reference.type === 'standard') {
+        const plane = sketch.reference.plane;
+        const offset = sketch.reference.offset;
+        if (offset !== 0) {
+          lines.push(`const ${wireVar} = ${varName}[0].sketchOnPlane("${plane}", ${offset.toFixed(2)});`);
+        } else {
+          lines.push(`const ${wireVar} = ${varName}[0].sketchOnPlane("${plane}");`);
+        }
+      } else {
+        lines.push(`// Face-based loft profiles not yet supported`);
+      }
+    }
+
+    if (wireVars.length >= 2) {
+      lines.push(`const loft_shape = ${wireVars[0]}.loftWith(${wireVars.slice(1).join(', ')});`);
+
+      const decl = declareResult ? 'let ' : '';
+      if (loft.operation === 'new') {
+        lines.push(`${decl}${resultVarName} = loft_shape;`);
+      } else if (loft.operation === 'cut') {
+        lines.push(`${resultVarName} = ${resultVarName}.cut(loft_shape);`);
+      } else {
+        lines.push(`${decl}${resultVarName} = ${resultVarName}.fuse(loft_shape);`);
+      }
+    }
+
+    return lines.join('\n  ');
+  }
+
+  /**
+   * Generate replicad code for a linear pattern feature
+   */
+  /**
+   * Determine if a feature is effectively subtractive (removes material).
+   * Walks pattern chains to find the root operation.
+   */
+  private isSubtractiveFeature(featureId: string, features: Feature[]): boolean {
+    const feature = features.find(f => f.id === featureId);
+    if (!feature) return false;
+    if (feature.type === 'cut') return true;
+    if (feature.type === 'linearPattern' || feature.type === 'polarPattern') {
+      return this.isSubtractiveFeature(feature.sourceFeatureId, features);
+    }
+    return false;
+  }
+
+  generateLinearPatternCode(
+    pattern: LinearPatternFeature,
+    resultVarName: string,
+    features: Feature[],
+    snapshotVar: string
+  ): string {
+    const lines: string[] = [];
+    const [dx, dy, dz] = pattern.direction;
+    const uid = snapshotVar.replace('result_pre_', '');
+
+    const isCut = this.isSubtractiveFeature(pattern.sourceFeatureId, features);
+
+    const deltaVar = `delta_${uid}`;
+
+    if (isCut) {
+      lines.push(`let ${deltaVar} = ${snapshotVar}.cut(${resultVarName});`);
+    } else {
+      lines.push(`let ${deltaVar} = ${resultVarName}.cut(${snapshotVar});`);
+    }
+
+    for (let i = 1; i < pattern.count; i++) {
+      const tx = (dx * pattern.spacing * i).toFixed(2);
+      const ty = (dy * pattern.spacing * i).toFixed(2);
+      const tz = (dz * pattern.spacing * i).toFixed(2);
+      if (isCut) {
+        lines.push(`${resultVarName} = ${resultVarName}.cut(${deltaVar}.clone().translate(${tx}, ${ty}, ${tz}));`);
+      } else {
+        lines.push(`${resultVarName} = ${resultVarName}.fuse(${deltaVar}.clone().translate(${tx}, ${ty}, ${tz}));`);
+      }
+    }
+
+    return lines.join('\n  ');
+  }
+
+  /**
+   * Generate replicad code for a polar pattern feature
+   */
+  generatePolarPatternCode(
+    pattern: PolarPatternFeature,
+    resultVarName: string,
+    features: Feature[],
+    snapshotVar: string
+  ): string {
+    const lines: string[] = [];
+    const angleStep = pattern.totalAngle / pattern.count;
+    const [ax, ay, az] = pattern.axis;
+    const [ox, oy, oz] = pattern.axisOrigin;
+    const uid = snapshotVar.replace('result_pre_', '');
+
+    const isCut = this.isSubtractiveFeature(pattern.sourceFeatureId, features);
+
+    const deltaVar = `delta_${uid}`;
+
+    if (isCut) {
+      lines.push(`let ${deltaVar} = ${snapshotVar}.cut(${resultVarName});`);
+    } else {
+      lines.push(`let ${deltaVar} = ${resultVarName}.cut(${snapshotVar});`);
+    }
+
+    for (let i = 1; i < pattern.count; i++) {
+      const angle = (angleStep * i).toFixed(2);
+      if (isCut) {
+        lines.push(`${resultVarName} = ${resultVarName}.cut(${deltaVar}.clone().rotate(${angle}, [${ox.toFixed(2)}, ${oy.toFixed(2)}, ${oz.toFixed(2)}], [${ax.toFixed(2)}, ${ay.toFixed(2)}, ${az.toFixed(2)}]));`);
+      } else {
+        lines.push(`${resultVarName} = ${resultVarName}.fuse(${deltaVar}.clone().rotate(${angle}, [${ox.toFixed(2)}, ${oy.toFixed(2)}, ${oz.toFixed(2)}], [${ax.toFixed(2)}, ${ay.toFixed(2)}, ${az.toFixed(2)}]));`);
+      }
+    }
+
+    return lines.join('\n  ');
   }
 
   /**
@@ -745,7 +905,12 @@ export class FeatureEvaluator {
       : 'XY';
 
     const lines: string[] = [];
-    lines.push(`const ${sweepVarName}_wire = ${sweepVarName}_path.sketchOnPlane("${pathPlane}");`);
+    const pathOffset = pathSketch.reference.type === 'standard' ? pathSketch.reference.offset : 0;
+    if (pathOffset !== 0) {
+      lines.push(`const ${sweepVarName}_wire = ${sweepVarName}_path.sketchOnPlane("${pathPlane}", ${pathOffset.toFixed(2)});`);
+    } else {
+      lines.push(`const ${sweepVarName}_wire = ${sweepVarName}_path.sketchOnPlane("${pathPlane}");`);
+    }
     lines.push(`const ${sweepVarName}_swept = ${sweepVarName}_wire.sweepSketch(`);
     lines.push(`  (plane, origin) => ${profileSketchVarName}[0].sketchOnPlane(plane, origin),`);
     lines.push(`  { withContact: true }`);
@@ -851,10 +1016,33 @@ function main() {
     const lines: string[] = [];
     let resultInitialized = false;
 
+    // Collect source feature IDs that patterns reference, so we can snapshot before them
+    // Map: sourceFeatureId -> [{patternVarName, patternType}]
+    const patternSnapshotMap = new Map<string, { varName: string }[]>();
+    let patternIdx = 0;
+    const patternSnapshotVars = new Map<string, string>(); // patternFeatureId -> snapshotVarName
+    for (const f of orderedFeatures) {
+      if (f.type === 'linearPattern' || f.type === 'polarPattern') {
+        const snapshotVar = `result_pre_pat${patternIdx++}`;
+        patternSnapshotVars.set(f.id, snapshotVar);
+        const existing = patternSnapshotMap.get(f.sourceFeatureId) || [];
+        existing.push({ varName: snapshotVar });
+        patternSnapshotMap.set(f.sourceFeatureId, existing);
+      }
+    }
+
     // Process each feature
     for (const feature of orderedFeatures) {
       const varName = toVariableName(feature.name);
       featureVarNames.set(feature.id, varName);
+
+      // If this feature is a pattern source, snapshot result before it
+      const snapshots = patternSnapshotMap.get(feature.id);
+      if (snapshots && resultInitialized) {
+        for (const s of snapshots) {
+          lines.push(`  let ${s.varName} = result.clone();`);
+        }
+      }
 
       lines.push(`  // ${feature.name}`);
 
@@ -991,6 +1179,53 @@ function main() {
 
           const shellCode = this.generateShellCode(feature, 'result');
           lines.push(`  ${shellCode}`);
+          break;
+        }
+
+        case 'loft': {
+          const profileVarNames: string[] = [];
+          for (const sketchId of feature.profileSketchIds) {
+            const pVarName = featureVarNames.get(sketchId);
+            if (pVarName) profileVarNames.push(pVarName);
+          }
+          if (profileVarNames.length < 2) {
+            lines.push(`  // ERROR: Loft requires at least 2 profile sketches`);
+            break;
+          }
+
+          const loftCode = this.generateLoftCode(
+            feature,
+            profileVarNames,
+            'result',
+            orderedFeatures,
+            !resultInitialized
+          );
+          lines.push(`  ${loftCode}`);
+          if (!resultInitialized) resultInitialized = true;
+          break;
+        }
+
+        case 'linearPattern': {
+          if (!resultInitialized) {
+            lines.push(`  // ERROR: Cannot create pattern without existing geometry`);
+            break;
+          }
+
+          const linSnapshotVar = patternSnapshotVars.get(feature.id) || 'result';
+          const linearPatternCode = this.generateLinearPatternCode(feature, 'result', orderedFeatures, linSnapshotVar);
+          lines.push(`  ${linearPatternCode}`);
+          break;
+        }
+
+        case 'polarPattern': {
+          if (!resultInitialized) {
+            lines.push(`  // ERROR: Cannot create pattern without existing geometry`);
+            break;
+          }
+
+          const polSnapshotVar = patternSnapshotVars.get(feature.id) || 'result';
+          const polarPatternCode = this.generatePolarPatternCode(feature, 'result', orderedFeatures, polSnapshotVar);
+          lines.push(`  ${polarPatternCode}`);
           break;
         }
       }

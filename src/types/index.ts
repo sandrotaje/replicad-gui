@@ -203,7 +203,7 @@ export interface SolverPoint {
   y: number;
   fixed?: boolean;
   elementId: string;      // Which SketchElement this belongs to
-  role: 'start' | 'end' | 'center' | 'corner' | 'control';
+  role: 'start' | 'end' | 'center' | 'corner' | 'control' | `control${number}`;
 }
 
 export interface SolverLine {
@@ -253,7 +253,20 @@ export type FeatureType =
   | 'fillet'
   | 'revolve'
   | 'shell'
-  | 'sweep';
+  | 'sweep'
+  | 'loft'
+  | 'linearPattern'
+  | 'polarPattern';
+
+/** Feature types that produce solid 3D geometry */
+export const SOLID_FEATURE_TYPES: readonly FeatureType[] = [
+  'extrusion', 'cut', 'sweep', 'loft', 'fillet', 'chamfer', 'shell', 'linearPattern', 'polarPattern',
+] as const;
+
+/** Check if a feature type produces solid geometry */
+export function isSolidFeature(type: FeatureType): boolean {
+  return (SOLID_FEATURE_TYPES as readonly string[]).includes(type);
+}
 
 export interface FeatureBase {
   id: string;
@@ -298,7 +311,7 @@ export interface ExtrusionFeature extends FeatureBase {
   type: 'extrusion';
   sketchId: string;                // Which sketch to extrude
   depth: number;                   // Extrusion depth
-  direction: 'normal' | 'reverse'; // Direction relative to sketch plane
+  direction: 'normal' | 'reverse' | 'symmetric'; // Direction relative to sketch plane
   operation: 'new' | 'fuse' | 'cut'; // How to combine with existing geometry
 }
 
@@ -344,6 +357,32 @@ export interface ShellFeature extends FeatureBase {
   faceIndices: number[];           // Faces to remove (open)
 }
 
+// Loft Feature - creates a shape by blending between two or more profiles
+export interface LoftFeature extends FeatureBase {
+  type: 'loft';
+  profileSketchIds: string[];          // Ordered list of sketch IDs (profiles to loft between)
+  operation: 'new' | 'fuse' | 'cut';  // How to combine with existing geometry
+}
+
+// Linear Pattern Feature - repeats a feature along a direction
+export interface LinearPatternFeature extends FeatureBase {
+  type: 'linearPattern';
+  sourceFeatureId: string;           // Feature to repeat
+  direction: [number, number, number]; // Direction vector
+  count: number;                      // Number of copies (including original)
+  spacing: number;                    // Distance between copies
+}
+
+// Polar Pattern Feature - repeats a feature around an axis
+export interface PolarPatternFeature extends FeatureBase {
+  type: 'polarPattern';
+  sourceFeatureId: string;
+  axis: [number, number, number];     // Rotation axis (normalized)
+  axisOrigin: [number, number, number]; // Point on the axis
+  count: number;                      // Number of copies (including original)
+  totalAngle: number;                 // Total angle in degrees (360 = full circle)
+}
+
 // Union of all feature types
 export type Feature =
   | SketchFeature
@@ -352,7 +391,10 @@ export type Feature =
   | ChamferFeature
   | FilletFeature
   | SweepFeature
-  | ShellFeature;
+  | ShellFeature
+  | LoftFeature
+  | LinearPatternFeature
+  | PolarPatternFeature;
 
 // ============ HISTORY/SNAPSHOT TYPES ============
 

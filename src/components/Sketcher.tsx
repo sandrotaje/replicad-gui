@@ -570,20 +570,20 @@ export function Sketcher() {
           const firstScreen = worldToScreen(element.points[0].x, element.points[0].y);
           ctx.moveTo(firstScreen.x, firstScreen.y);
 
-          // Draw smooth curve through points using quadratic curves
-          for (let i = 1; i < element.points.length; i++) {
-            const curr = worldToScreen(element.points[i].x, element.points[i].y);
-            if (i === 1) {
-              ctx.lineTo(curr.x, curr.y);
-            } else {
-              const prev = worldToScreen(element.points[i - 1].x, element.points[i - 1].y);
-              const midX = (prev.x + curr.x) / 2;
-              const midY = (prev.y + curr.y) / 2;
-              ctx.quadraticCurveTo(prev.x, prev.y, midX, midY);
+          if (element.points.length === 2) {
+            // Only 2 points: draw a straight line
+            const lastScreen = worldToScreen(element.points[1].x, element.points[1].y);
+            ctx.lineTo(lastScreen.x, lastScreen.y);
+          } else {
+            // 3+ points: use quadratic curves through all segments
+            for (let i = 1; i < element.points.length - 1; i++) {
+              const curr = worldToScreen(element.points[i].x, element.points[i].y);
+              const next = worldToScreen(element.points[i + 1].x, element.points[i + 1].y);
+              const midX = (curr.x + next.x) / 2;
+              const midY = (curr.y + next.y) / 2;
+              ctx.quadraticCurveTo(curr.x, curr.y, midX, midY);
             }
-          }
-          // Draw to the last point
-          if (element.points.length > 2) {
+            // Final segment to last point
             const last = worldToScreen(
               element.points[element.points.length - 1].x,
               element.points[element.points.length - 1].y
@@ -947,61 +947,54 @@ export function Sketcher() {
       ctx.setLineDash([5, 5]);
 
       if (drawingState.tool === 'arc' && drawingState.points.length >= 1) {
-        // Arc preview: show center, then radius line
-        const center = worldToScreen(drawingState.points[0].x, drawingState.points[0].y);
-        ctx.fillStyle = '#fab387';
-        ctx.beginPath();
-        ctx.arc(center.x, center.y, 5, 0, Math.PI * 2);
-        ctx.fill();
+        // Draw confirmed points
+        for (const p of drawingState.points) {
+          const screen = worldToScreen(p.x, p.y);
+          ctx.fillStyle = '#fab387';
+          ctx.beginPath();
+          ctx.arc(screen.x, screen.y, 5, 0, Math.PI * 2);
+          ctx.fill();
+        }
 
         if (currentPoint) {
-          const radius = Math.sqrt(
-            (currentPoint.x - drawingState.points[0].x) ** 2 +
-              (currentPoint.y - drawingState.points[0].y) ** 2
-          );
-
           if (drawingState.points.length === 1) {
-            // Show radius line
-            const endScreen = worldToScreen(currentPoint.x, currentPoint.y);
+            // Show line from start to current (preview for second point)
+            const start = worldToScreen(drawingState.points[0].x, drawingState.points[0].y);
+            const curr = worldToScreen(currentPoint.x, currentPoint.y);
             ctx.beginPath();
-            ctx.moveTo(center.x, center.y);
-            ctx.lineTo(endScreen.x, endScreen.y);
+            ctx.moveTo(start.x, start.y);
+            ctx.lineTo(curr.x, curr.y);
             ctx.stroke();
+          } else if (drawingState.points.length === 2) {
+            // Preview the arc through 3 points
+            const startPt = drawingState.points[0];
+            const midPt = drawingState.points[1];
+            const endPt = currentPoint;
 
-            ctx.fillStyle = '#cdd6f4';
-            ctx.font = '12px monospace';
-            ctx.fillText(`r = ${radius.toFixed(0)}`, center.x + 10, center.y - 10);
-          } else if (drawingState.points.length >= 2) {
-            // Show arc with current end angle
-            const storedRadius = Math.sqrt(
-              (drawingState.points[1].x - drawingState.points[0].x) ** 2 +
-                (drawingState.points[1].y - drawingState.points[0].y) ** 2
-            );
-            const storedRadiusScreen = storedRadius * scale;
-            const startAngle = Math.atan2(
-              drawingState.points[1].y - drawingState.points[0].y,
-              drawingState.points[1].x - drawingState.points[0].x
-            );
+            const ax = startPt.x, ay = startPt.y;
+            const bx = midPt.x, by = midPt.y;
+            const cx = endPt.x, cy = endPt.y;
+            const d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
 
-            if (drawingState.points.length === 2) {
-              // Show start angle line and prompt for end angle
-              const startEndScreen = worldToScreen(
-                drawingState.points[0].x + storedRadius * Math.cos(startAngle),
-                drawingState.points[0].y + storedRadius * Math.sin(startAngle)
-              );
+            if (Math.abs(d) > 0.001) {
+              const ux = ((ax * ax + ay * ay) * (by - cy) + (bx * bx + by * by) * (cy - ay) + (cx * cx + cy * cy) * (ay - by)) / d;
+              const uy = ((ax * ax + ay * ay) * (cx - bx) + (bx * bx + by * by) * (ax - cx) + (cx * cx + cy * cy) * (bx - ax)) / d;
+              const radius = Math.sqrt((ax - ux) * (ax - ux) + (ay - uy) * (ay - uy));
+              const center = worldToScreen(ux, uy);
+              const radiusScreen = radius * scale;
+              const startAngle = Math.atan2(ay - uy, ax - ux);
+              const endAngle = Math.atan2(cy - uy, cx - ux);
+
               ctx.beginPath();
-              ctx.moveTo(center.x, center.y);
-              ctx.lineTo(startEndScreen.x, startEndScreen.y);
+              ctx.arc(center.x, center.y, radiusScreen, -startAngle, -endAngle, true);
               ctx.stroke();
-
-              // Preview arc to current mouse position
-              const endAngle = Math.atan2(
-                currentPoint.y - drawingState.points[0].y,
-                currentPoint.x - drawingState.points[0].x
-              );
-
+            } else {
+              // Points are collinear, draw a line
+              const start = worldToScreen(startPt.x, startPt.y);
+              const curr = worldToScreen(currentPoint.x, currentPoint.y);
               ctx.beginPath();
-              ctx.arc(center.x, center.y, storedRadiusScreen, -startAngle, -endAngle, true);
+              ctx.moveTo(start.x, start.y);
+              ctx.lineTo(curr.x, curr.y);
               ctx.stroke();
             }
           }
@@ -1190,47 +1183,48 @@ export function Sketcher() {
         clearConstraintSelection();
       }
     } else if (currentTool === 'arc') {
-      // Multi-step arc drawing
+      // 3-point arc: start -> point on arc -> end
       if (!drawingState) {
-        // First click: set center
+        // First click: set start point
         setDrawingState({ tool: 'arc', step: 0, points: [point] });
       } else if (drawingState.step === 0) {
-        // Second click: set radius (end of radius line)
+        // Second click: set point on arc
         setDrawingState({
           ...drawingState,
           step: 1,
           points: [...drawingState.points, point],
         });
       } else if (drawingState.step === 1) {
-        // Third click: set start angle
-        setDrawingState({
-          ...drawingState,
-          step: 2,
-          points: [...drawingState.points, point],
-        });
-      } else if (drawingState.step === 2) {
-        // Fourth click: complete arc
-        const center = drawingState.points[0];
-        const radiusPoint = drawingState.points[1];
-        const radius = Math.sqrt(
-          (radiusPoint.x - center.x) ** 2 + (radiusPoint.y - center.y) ** 2
-        );
-        const startAngle = Math.atan2(
-          drawingState.points[2].y - center.y,
-          drawingState.points[2].x - center.x
-        );
-        const endAngle = Math.atan2(point.y - center.y, point.x - center.x);
+        // Third click: set end point -> create arc
+        const startPt = drawingState.points[0];
+        const midPt = drawingState.points[1];
+        const endPt = point;
 
-        const newElement = {
-          type: 'arc' as const,
-          id: crypto.randomUUID(),
-          center,
-          radius,
-          startAngle,
-          endAngle,
-        };
-        addElement(newElement);
-        applyAutoConstraints(newElement as SketchElement);
+        // Calculate center and radius from 3 points
+        const ax = startPt.x, ay = startPt.y;
+        const bx = midPt.x, by = midPt.y;
+        const cx = endPt.x, cy = endPt.y;
+
+        const d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
+        if (Math.abs(d) > 0.001) {
+          const ux = ((ax * ax + ay * ay) * (by - cy) + (bx * bx + by * by) * (cy - ay) + (cx * cx + cy * cy) * (ay - by)) / d;
+          const uy = ((ax * ax + ay * ay) * (cx - bx) + (bx * bx + by * by) * (ax - cx) + (cx * cx + cy * cy) * (bx - ax)) / d;
+          const radius = Math.sqrt((ax - ux) * (ax - ux) + (ay - uy) * (ay - uy));
+          const center = { x: ux, y: uy };
+          const startAngle = Math.atan2(ay - uy, ax - ux);
+          const endAngle = Math.atan2(cy - uy, cx - ux);
+
+          const newElement = {
+            type: 'arc' as const,
+            id: crypto.randomUUID(),
+            center,
+            radius,
+            startAngle,
+            endAngle,
+          };
+          addElement(newElement);
+          applyAutoConstraints(newElement as SketchElement);
+        }
         setDrawingState(null);
       }
     } else if (currentTool === 'spline') {
@@ -1311,11 +1305,17 @@ export function Sketcher() {
             } else if (role === 'end') {
               updateElement(dragElementId, { length: point.y - vline.start.y });
             }
-          }
-
-          // Solve constraints in real-time during point drag
-          if (editingSketchId) {
-            solveConstraints(editingSketchId);
+          } else if (element?.type === 'spline') {
+            const controlMatch = role?.match(/^control(\d+)$/);
+            if (controlMatch) {
+              const controlIndex = parseInt(controlMatch[1], 10);
+              const splineElement = element as unknown as import('../types').SplineElement;
+              if (controlIndex >= 0 && controlIndex < splineElement.points.length) {
+                const newPoints = [...splineElement.points];
+                newPoints[controlIndex] = { x: point.x, y: point.y };
+                updateElement(dragElementId, { points: newPoints });
+              }
+            }
           }
         }
         // Don't update dragStart for point dragging - we use absolute position
@@ -1338,8 +1338,7 @@ export function Sketcher() {
   // Mouse up handler
   const handleMouseUp = () => {
     if (isDragging) {
-      // After dragging, re-solve constraints to maintain them
-      if (editingSketchId) {
+      if (editingSketchId && existingConstraints.length > 0) {
         solveConstraints(editingSketchId);
       }
       setIsDragging(false);
@@ -1717,31 +1716,26 @@ export function Sketcher() {
             points: [...drawingState.points, point],
           });
         } else if (drawingState.step === 1) {
-          setDrawingState({
-            ...drawingState,
-            step: 2,
-            points: [...drawingState.points, point],
-          });
-        } else if (drawingState.step === 2) {
-          const center = drawingState.points[0];
-          const radiusPoint = drawingState.points[1];
-          const radius = Math.sqrt(
-            (radiusPoint.x - center.x) ** 2 + (radiusPoint.y - center.y) ** 2
-          );
-          const startAngle = Math.atan2(
-            drawingState.points[2].y - center.y,
-            drawingState.points[2].x - center.x
-          );
-          const endAngle = Math.atan2(point.y - center.y, point.x - center.x);
-
-          addElement({
-            type: 'arc',
-            id: crypto.randomUUID(),
-            center,
-            radius,
-            startAngle,
-            endAngle,
-          });
+          const startPt = drawingState.points[0];
+          const midPt = drawingState.points[1];
+          const endPt = point;
+          const ax = startPt.x, ay = startPt.y;
+          const bx = midPt.x, by = midPt.y;
+          const cx = endPt.x, cy = endPt.y;
+          const d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
+          if (Math.abs(d) > 0.001) {
+            const ux = ((ax * ax + ay * ay) * (by - cy) + (bx * bx + by * by) * (cy - ay) + (cx * cx + cy * cy) * (ay - by)) / d;
+            const uy = ((ax * ax + ay * ay) * (cx - bx) + (bx * bx + by * by) * (ax - cx) + (cx * cx + cy * cy) * (bx - ax)) / d;
+            const radius = Math.sqrt((ax - ux) * (ax - ux) + (ay - uy) * (ay - uy));
+            addElement({
+              type: 'arc',
+              id: crypto.randomUUID(),
+              center: { x: ux, y: uy },
+              radius,
+              startAngle: Math.atan2(ay - uy, ax - ux),
+              endAngle: Math.atan2(cy - uy, cx - ux),
+            });
+          }
           setDrawingState(null);
         }
       } else if (currentTool === 'spline') {
@@ -2232,9 +2226,8 @@ export function Sketcher() {
         >
           {drawingState.tool === 'arc' && (
             <>
-              {drawingState.step === 0 && 'Click to set radius'}
-              {drawingState.step === 1 && 'Click to set start angle'}
-              {drawingState.step === 2 && 'Click to set end angle'}
+              {drawingState.step === 0 && 'Click to set point on arc'}
+              {drawingState.step === 1 && 'Click to set end point'}
             </>
           )}
           {drawingState.tool === 'spline' && (
@@ -2294,6 +2287,64 @@ export function Sketcher() {
         onApplyConstraint={handleApplyConstraint}
         onDelete={handleDeleteSelected}
       />
+
+      {/* Constraint list panel */}
+      {editingSketchId && existingConstraints.length > 0 && (
+        <div
+          style={{
+            position: 'absolute',
+            right: 16,
+            bottom: 16,
+            maxHeight: '200px',
+            overflowY: 'auto',
+            padding: '8px',
+            backgroundColor: 'rgba(30, 30, 46, 0.95)',
+            borderRadius: '8px',
+            border: '1px solid #45475a',
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+            fontSize: '11px',
+            color: '#cdd6f4',
+            minWidth: '140px',
+          }}
+        >
+          <div style={{ fontWeight: 600, marginBottom: '4px', color: '#a6adc8' }}>
+            Constraints
+          </div>
+          {existingConstraints.map((c) => (
+            <div
+              key={c.id}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '2px 0',
+              }}
+            >
+              <span>
+                {c.type}
+                {c.value !== undefined ? ` = ${c.value}` : ''}
+              </span>
+              <button
+                onClick={() =>
+                  useFeatureStore.getState().removeConstraint(editingSketchId, c.id)
+                }
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#f38ba8',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  padding: '0 2px',
+                  lineHeight: 1,
+                }}
+                title="Remove constraint"
+              >
+                x
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

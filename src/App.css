@@ -56,12 +56,14 @@
   display: flex;
   flex: 1;
   overflow: hidden;
+  min-height: 0;
 }
 
 .views-container {
   display: flex;
   flex: 1;
   overflow: hidden;
+  min-height: 0;
 }
 
 .views-container.split .view-panel {
@@ -72,7 +74,7 @@
   flex: 1;
 }
 
-.views-container.\33d .viewer-panel {
+.views-container.\33 d .viewer-panel {
   flex: 1;
 }
 
@@ -81,6 +83,7 @@
   flex-direction: column;
   border-right: 1px solid #313244;
   overflow: hidden;
+  min-height: 0;
 }
 
 .view-panel:last-child {
@@ -102,6 +105,11 @@
 
 .viewer-panel {
   background-color: #1e1e2e;
+}
+
+.viewer-panel > div:not(.panel-header) {
+  flex: 1;
+  min-height: 0;
 }
 
 .code-panel {

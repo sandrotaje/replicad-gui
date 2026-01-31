@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useStore } from '../store/useStore';
 import { useFeatureStore } from '../store/useFeatureStore';
 import type { SketchFeature, ExtrusionFeature, CutFeature, ChamferFeature, FilletFeature, ShellFeature, SweepFeature, Feature, StandardPlane } from '../types';
+import { isSolidFeature } from '../types';
 import { exportToSTL } from '../utils/stlExporter';
 import { DepthPromptDialog, type OperationDirection } from './DepthPromptDialog';
 import { BevelDialog, type BevelType } from './BevelDialog';
@@ -46,6 +47,7 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
 
   // Plane picker state
   const [showPlanePicker, setShowPlanePicker] = useState(false);
+  const [planeOffset, setPlaneOffset] = useState(0);
 
   // Sketch undo/redo
   const sketchUndo = useStore((state) => state.sketchUndo);
@@ -110,10 +112,11 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
 
   const handlePlaneSelected = (plane: StandardPlane) => {
     setShowPlanePicker(false);
+    setPlaneOffset(0);
     const sketchFeatureData: Omit<SketchFeature, 'id' | 'createdAt' | 'isValid' | 'isDirty'> = {
       type: 'sketch',
       name: generateUniqueName('sketch'),
-      reference: { type: 'standard', plane, offset: 0 },
+      reference: { type: 'standard', plane, offset: planeOffset },
       elements: [],
       isClosed: false,
       isCollapsed: false,
@@ -134,8 +137,8 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
     const boundaryPoints = selectedPlanarFace.boundaryPoints2D || [];
 
     // Find the last 3D-generating feature (extrusion or cut) to reference
-    const solidFeatures = features.filter(f => f.type === 'extrusion' || f.type === 'cut' || f.type === 'sweep');
-    const lastSolidFeature = solidFeatures[solidFeatures.length - 1] as ExtrusionFeature | CutFeature | SweepFeature | undefined;
+    const solidFeatures = features.filter(f => isSolidFeature(f.type));
+    const lastSolidFeature = solidFeatures[solidFeatures.length - 1] as Feature | undefined;
 
     if (!lastSolidFeature) {
       console.warn('Cannot sketch on face: No solid features (extrusion/cut) found. Create an extrusion first.');
@@ -173,8 +176,7 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
     if (!editingSketchId || extrudableElementCount === 0) return;
 
     // Cut requires existing geometry
-    const hasExistingExtrusions = features.some(f => f.type === 'extrusion' || f.type === 'sweep');
-    if (!hasExistingExtrusions) {
+    if (!features.some(f => isSolidFeature(f.type))) {
       console.warn('Cannot cut: No existing geometry to cut from');
       return;
     }
@@ -187,7 +189,7 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
     if (!editingSketchId || !pendingOperation) return;
 
     if (pendingOperation === 'extrude') {
-      const hasExistingExtrusions = features.some(f => f.type === 'extrusion' || f.type === 'sweep');
+      const hasExistingExtrusions = features.some(f => isSolidFeature(f.type));
       const extrusionFeatureData: Omit<ExtrusionFeature, 'id' | 'createdAt' | 'isValid' | 'isDirty'> = {
         type: 'extrusion',
         name: generateUniqueName('extrusion'),
@@ -225,7 +227,7 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
 
   // Find the last solid feature (extrusion or cut) for bevel operations
   const getLastSolidFeatureId = (): string | null => {
-    const solidFeatures = features.filter(f => f.type === 'extrusion' || f.type === 'cut' || f.type === 'sweep' || f.type === 'chamfer' || f.type === 'fillet');
+    const solidFeatures = features.filter(f => isSolidFeature(f.type));
     return solidFeatures.length > 0 ? solidFeatures[solidFeatures.length - 1].id : null;
   };
 
@@ -295,14 +297,10 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
     }
   };
 
-  // Check if there's existing solid geometry (for shell)
-  const hasSolidGeometry = features.some(f => f.type === 'extrusion' || f.type === 'cut');
+  const hasSolidGeometry = features.some(f => isSolidFeature(f.type));
 
-  // Find the last 3D-generating feature for shell target
   const lastSolidFeature = (() => {
-    const solidFeatures = features.filter(f =>
-      f.type === 'extrusion' || f.type === 'cut' || f.type === 'chamfer' || f.type === 'fillet' || f.type === 'shell'
-    );
+    const solidFeatures = features.filter(f => isSolidFeature(f.type));
     return solidFeatures[solidFeatures.length - 1];
   })();
 
@@ -348,6 +346,56 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
 
   const handleSweepCancel = () => {
     setShowSweepDialog(false);
+  };
+
+  const handleLoft = () => {
+    const sketches = features.filter(f => f.type === 'sketch');
+    if (sketches.length < 2) return;
+    const profileIds = sketches.slice(-2).map(s => s.id);
+    addFeature({
+      type: 'loft',
+      name: generateUniqueName('loft'),
+      profileSketchIds: profileIds,
+      operation: 'new',
+    } as any);
+    if (isMobile && setToolsOpen) {
+      setToolsOpen(false);
+    }
+  };
+
+  const handleLinearPattern = () => {
+    const solidFeatures = features.filter(f => f.type !== 'sketch');
+    if (solidFeatures.length === 0) return;
+    const sourceId = solidFeatures[solidFeatures.length - 1].id;
+    addFeature({
+      type: 'linearPattern',
+      name: generateUniqueName('linearPattern'),
+      sourceFeatureId: sourceId,
+      direction: [1, 0, 0],
+      count: 3,
+      spacing: 30,
+    } as any);
+    if (isMobile && setToolsOpen) {
+      setToolsOpen(false);
+    }
+  };
+
+  const handlePolarPattern = () => {
+    const solidFeatures = features.filter(f => f.type !== 'sketch');
+    if (solidFeatures.length === 0) return;
+    const sourceId = solidFeatures[solidFeatures.length - 1].id;
+    addFeature({
+      type: 'polarPattern',
+      name: generateUniqueName('polarPattern'),
+      sourceFeatureId: sourceId,
+      axis: [0, 0, 1],
+      axisOrigin: [0, 0, 0],
+      count: 6,
+      totalAngle: 360,
+    } as any);
+    if (isMobile && setToolsOpen) {
+      setToolsOpen(false);
+    }
   };
 
   // Check if sweep is available (need at least one sketch with a closed profile and one with an open path)
@@ -434,6 +482,33 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
             Sweep
           </button>
         )}
+        {!editingSketchId && features.filter(f => f.type === 'sketch').length >= 2 && (
+          <button
+            style={featureButtonStyle('#f5c2e7')}
+            onClick={handleLoft}
+            title="Create loft between sketches"
+          >
+            Loft
+          </button>
+        )}
+        {!editingSketchId && hasSolidGeometry && (
+          <>
+            <button
+              style={featureButtonStyle('#89dceb')}
+              onClick={handleLinearPattern}
+              title="Create linear pattern"
+            >
+              Lin. Pattern
+            </button>
+            <button
+              style={featureButtonStyle('#f9e2af')}
+              onClick={handlePolarPattern}
+              title="Create polar pattern"
+            >
+              Polar Pattern
+            </button>
+          </>
+        )}
         {editingSketchId && (
           <>
             <button
@@ -445,11 +520,11 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
               Extrude
             </button>
             <button
-              style={extrudableElementCount > 0 && features.some(f => f.type === 'extrusion' || f.type === 'sweep')
+              style={extrudableElementCount > 0 && features.some(f => isSolidFeature(f.type))
                 ? featureButtonStyle('#f38ba8')
                 : disabledButtonStyle()}
               onClick={handleCut}
-              disabled={extrudableElementCount === 0 || !features.some(f => f.type === 'extrusion' || f.type === 'sweep')}
+              disabled={extrudableElementCount === 0 || !features.some(f => isSolidFeature(f.type))}
               title="Cut using the current sketch (X)"
             >
               Cut
@@ -586,6 +661,35 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
         </button>
       )}
 
+      {!editingSketchId && features.filter(f => f.type === 'sketch').length >= 2 && (
+        <button
+          style={featureButtonStyle('#f5c2e7')}
+          onClick={handleLoft}
+          title="Create loft between sketches"
+        >
+          Loft
+        </button>
+      )}
+
+      {!editingSketchId && hasSolidGeometry && (
+        <>
+          <button
+            style={featureButtonStyle('#89dceb')}
+            onClick={handleLinearPattern}
+            title="Create linear pattern"
+          >
+            Lin. Pattern
+          </button>
+          <button
+            style={featureButtonStyle('#f9e2af')}
+            onClick={handlePolarPattern}
+            title="Create polar pattern"
+          >
+            Polar Pattern
+          </button>
+        </>
+      )}
+
       {editingSketchId && (
         <>
           <button
@@ -597,11 +701,11 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
             Extrude
           </button>
           <button
-            style={extrudableElementCount > 0 && features.some(f => f.type === 'extrusion' || f.type === 'sweep')
+            style={extrudableElementCount > 0 && features.some(f => isSolidFeature(f.type))
               ? featureButtonStyle('#f38ba8')
               : disabledButtonStyle()}
             onClick={handleCut}
-            disabled={extrudableElementCount === 0 || !features.some(f => f.type === 'extrusion' || f.type === 'sweep')}
+            disabled={extrudableElementCount === 0 || !features.some(f => isSolidFeature(f.type))}
             title="Cut using the current sketch (X)"
           >
             Cut
@@ -792,7 +896,7 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
             justifyContent: 'center',
             zIndex: 1000,
           }}
-          onClick={() => setShowPlanePicker(false)}
+          onClick={() => { setShowPlanePicker(false); setPlaneOffset(0); }}
         >
           <div
             style={{
@@ -827,6 +931,27 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
                   {plane}
                 </button>
               ))}
+            </div>
+            <div style={{ marginTop: '12px' }}>
+              <label style={{ fontSize: '12px', color: '#a6adc8', display: 'block', marginBottom: '4px' }}>
+                Offset from plane
+              </label>
+              <input
+                type="number"
+                value={planeOffset}
+                onChange={(e) => setPlaneOffset(parseFloat(e.target.value) || 0)}
+                style={{
+                  width: '100%',
+                  padding: '6px 8px',
+                  backgroundColor: '#313244',
+                  border: '1px solid #45475a',
+                  borderRadius: '4px',
+                  color: '#cdd6f4',
+                  fontSize: '13px',
+                  boxSizing: 'border-box' as const,
+                }}
+                step="1"
+              />
             </div>
           </div>
         </div>
