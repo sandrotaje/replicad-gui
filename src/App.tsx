@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Sketcher, CodeEditor, Viewer3D, Toolbar, FeatureTree } from './components';
+import { ToastContainer } from './components/Toast';
 import { useFeatureStore } from './store/useFeatureStore';
 import { useStore } from './store/useStore';
 import { featureEvaluator } from './utils/featureEvaluator';
@@ -273,6 +274,7 @@ function App() {
           </div>
         )}
       </div>
+      <ToastContainer />
     </div>
   );
 }

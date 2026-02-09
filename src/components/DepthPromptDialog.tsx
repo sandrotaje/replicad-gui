@@ -78,8 +78,10 @@ export function DepthPromptDialog({ isOpen, operationType, onConfirm, onCancel }
           borderRadius: '12px',
           border: '1px solid #45475a',
           padding: '24px',
-          minWidth: '300px',
-          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+          minWidth: '320px',
+          maxWidth: '400px',
+          boxShadow: '0 12px 40px rgba(0, 0, 0, 0.5)',
+          animation: 'dialog-in 0.2s ease-out',
         }}
       >
         <h3

@@ -7,6 +7,7 @@ import { exportToSTL } from '../utils/stlExporter';
 import { DepthPromptDialog, type OperationDirection } from './DepthPromptDialog';
 import { BevelDialog, type BevelType } from './BevelDialog';
 import { SweepDialog } from './SweepDialog';
+import { showToast } from '../utils/toast';
 
 // Undo/Redo button styles
 const undoRedoButtonStyle = (enabled: boolean) => ({
@@ -90,7 +91,7 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
     cursor: 'pointer',
     fontWeight: 600 as const,
     fontSize: '13px',
-    transition: 'all 0.2s',
+    transition: 'all 0.15s ease',
     backgroundColor: color,
     color: '#1e1e2e',
     display: 'flex' as const,
@@ -104,6 +105,23 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
     opacity: 0.5,
     color: '#6c7086',
   });
+
+  const hoverIn = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (e.currentTarget.disabled) return;
+    e.currentTarget.style.filter = 'brightness(1.15)';
+    e.currentTarget.style.transform = 'translateY(-1px)';
+    e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.25)';
+  };
+  const hoverOut = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.currentTarget.style.filter = '';
+    e.currentTarget.style.transform = '';
+    e.currentTarget.style.boxShadow = '';
+  };
+  const activeIn = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (e.currentTarget.disabled) return;
+    e.currentTarget.style.transform = 'translateY(0)';
+    e.currentTarget.style.filter = 'brightness(0.95)';
+  };
 
   // Feature handlers
   const handleNewSketch = () => {
@@ -415,6 +433,7 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
   const handleExportSTL = () => {
     if (!shapeData) return;
     exportToSTL(shapeData, 'model.stl');
+    showToast('Exported model.stl', 'success');
     if (isMobile && setToolsOpen) {
       setToolsOpen(false);
     }
@@ -619,22 +638,44 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
     </div>
   );
 
+  // Keyboard shortcut badge
+  const Kbd = ({ children }: { children: React.ReactNode }) => (
+    <span style={{
+      fontSize: '10px',
+      padding: '1px 5px',
+      borderRadius: 3,
+      backgroundColor: 'rgba(0,0,0,0.25)',
+      color: 'inherit',
+      fontWeight: 700,
+      letterSpacing: '0.5px',
+      marginLeft: 2,
+    }}>
+      {children}
+    </span>
+  );
+
   // Desktop toolbar
   const renderDesktopToolbar = () => (
-    <div className="toolbar-desktop" style={{ display: 'flex', gap: '12px', flex: 1, alignItems: 'center' }}>
+    <div className="toolbar-desktop" style={{ display: 'flex', gap: '10px', flex: 1, alignItems: 'center' }}>
       {/* Feature Buttons */}
       <button
         style={featureButtonStyle('#a6e3a1')}
         onClick={handleNewSketch}
+        onMouseEnter={hoverIn}
+        onMouseLeave={hoverOut}
+        onMouseDown={activeIn}
         title="Create a new sketch on XY plane (S)"
       >
-        + Sketch
+        + Sketch <Kbd>S</Kbd>
       </button>
 
       {selectedPlanarFace && !editingSketchId && (
         <button
           style={featureButtonStyle('#f9e2af')}
           onClick={handleSketchOnFace}
+          onMouseEnter={hoverIn}
+          onMouseLeave={hoverOut}
+          onMouseDown={activeIn}
           title="Create a sketch on the selected face"
         >
           Sketch on Face
@@ -645,6 +686,9 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
         <button
           style={featureButtonStyle('#cba6f7')}
           onClick={handleShell}
+          onMouseEnter={hoverIn}
+          onMouseLeave={hoverOut}
+          onMouseDown={activeIn}
           title="Shell the solid (hollow out with selected faces removed)"
         >
           Shell
@@ -655,6 +699,9 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
         <button
           style={featureButtonStyle('#94e2d5')}
           onClick={handleSweep}
+          onMouseEnter={hoverIn}
+          onMouseLeave={hoverOut}
+          onMouseDown={activeIn}
           title="Sweep a profile along a path"
         >
           Sweep
@@ -665,6 +712,9 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
         <button
           style={featureButtonStyle('#f5c2e7')}
           onClick={handleLoft}
+          onMouseEnter={hoverIn}
+          onMouseLeave={hoverOut}
+          onMouseDown={activeIn}
           title="Create loft between sketches"
         >
           Loft
@@ -676,6 +726,9 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
           <button
             style={featureButtonStyle('#89dceb')}
             onClick={handleLinearPattern}
+            onMouseEnter={hoverIn}
+            onMouseLeave={hoverOut}
+            onMouseDown={activeIn}
             title="Create linear pattern"
           >
             Lin. Pattern
@@ -683,6 +736,9 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
           <button
             style={featureButtonStyle('#f9e2af')}
             onClick={handlePolarPattern}
+            onMouseEnter={hoverIn}
+            onMouseLeave={hoverOut}
+            onMouseDown={activeIn}
             title="Create polar pattern"
           >
             Polar Pattern
@@ -695,20 +751,26 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
           <button
             style={extrudableElementCount > 0 ? featureButtonStyle('#89b4fa') : disabledButtonStyle()}
             onClick={handleExtrude}
+            onMouseEnter={hoverIn}
+            onMouseLeave={hoverOut}
+            onMouseDown={activeIn}
             disabled={extrudableElementCount === 0}
             title="Extrude the current sketch (E)"
           >
-            Extrude
+            Extrude <Kbd>E</Kbd>
           </button>
           <button
             style={extrudableElementCount > 0 && features.some(f => isSolidFeature(f.type))
               ? featureButtonStyle('#f38ba8')
               : disabledButtonStyle()}
             onClick={handleCut}
+            onMouseEnter={hoverIn}
+            onMouseLeave={hoverOut}
+            onMouseDown={activeIn}
             disabled={extrudableElementCount === 0 || !features.some(f => isSolidFeature(f.type))}
             title="Cut using the current sketch (X)"
           >
-            Cut
+            Cut <Kbd>X</Kbd>
           </button>
           <button
             style={{
@@ -720,11 +782,14 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
               fontSize: '13px',
               backgroundColor: 'transparent',
               color: '#a6adc8',
+              transition: 'all 0.15s ease',
             }}
             onClick={handleFinishSketch}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#313244'; e.currentTarget.style.color = '#cdd6f4'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#a6adc8'; }}
             title="Finish editing without creating a feature (Esc)"
           >
-            Finish
+            Finish <Kbd>Esc</Kbd>
           </button>
 
           {/* Undo/Redo buttons */}
@@ -739,6 +804,8 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
           <button
             style={undoRedoButtonStyle(canSketchUndo())}
             onClick={sketchUndo}
+            onMouseEnter={(e) => { if (canSketchUndo()) { e.currentTarget.style.backgroundColor = '#45475a'; } }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
             disabled={!canSketchUndo()}
             title="Undo (Cmd/Ctrl+Z)"
           >
@@ -747,6 +814,8 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
           <button
             style={undoRedoButtonStyle(canSketchRedo())}
             onClick={sketchRedo}
+            onMouseEnter={(e) => { if (canSketchRedo()) { e.currentTarget.style.backgroundColor = '#45475a'; } }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
             disabled={!canSketchRedo()}
             title="Redo (Cmd/Ctrl+Shift+Z)"
           >
@@ -763,6 +832,9 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
           <button
             style={featureButtonStyle('#cba6f7')}
             onClick={handleFillet}
+            onMouseEnter={hoverIn}
+            onMouseLeave={hoverOut}
+            onMouseDown={activeIn}
             title="Add fillet (rounded edges)"
           >
             Fillet
@@ -770,6 +842,9 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
           <button
             style={featureButtonStyle('#fab387')}
             onClick={handleChamfer}
+            onMouseEnter={hoverIn}
+            onMouseLeave={hoverOut}
+            onMouseDown={activeIn}
             title="Add chamfer (angled edges)"
           >
             Chamfer
@@ -781,6 +856,9 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
       <button
         style={shapeData ? featureButtonStyle('#94e2d5') : disabledButtonStyle()}
         onClick={handleExportSTL}
+        onMouseEnter={hoverIn}
+        onMouseLeave={hoverOut}
+        onMouseDown={activeIn}
         disabled={!shapeData}
         title="Export model as STL file"
       >
@@ -791,8 +869,15 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
       <span style={{ color: '#6c7086', fontSize: '12px' }}>
         {features.length} feature{features.length !== 1 ? 's' : ''}
         {editingSketchId && editingSketch && (
-          <span style={{ marginLeft: '8px', color: '#a6e3a1' }}>
-            (Editing: {editingSketch.name})
+          <span style={{
+            marginLeft: '8px',
+            color: '#a6e3a1',
+            padding: '2px 8px',
+            backgroundColor: 'rgba(166, 227, 161, 0.12)',
+            borderRadius: '4px',
+            fontSize: '12px',
+          }}>
+            Editing: {editingSketch.name}
           </span>
         )}
       </span>
@@ -901,39 +986,58 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
           <div
             style={{
               backgroundColor: '#1e1e2e',
-              border: '1px solid #313244',
-              borderRadius: '8px',
-              padding: '20px',
-              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+              border: '1px solid #45475a',
+              borderRadius: '12px',
+              padding: '24px',
+              minWidth: '280px',
+              boxShadow: '0 12px 40px rgba(0, 0, 0, 0.5)',
+              animation: 'dialog-in 0.2s ease-out',
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ fontSize: '14px', fontWeight: 600, color: '#cdd6f4', marginBottom: '12px' }}>
+            <div style={{ fontSize: '16px', fontWeight: 600, color: '#cdd6f4', marginBottom: '16px' }}>
               Select Sketch Plane
             </div>
             <div style={{ display: 'flex', gap: '8px' }}>
-              {(['XY', 'XZ', 'YZ'] as StandardPlane[]).map((plane) => (
-                <button
-                  key={plane}
-                  onClick={() => handlePlaneSelected(plane)}
-                  style={{
-                    padding: '10px 20px',
-                    border: '1px solid #45475a',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontWeight: 600,
-                    fontSize: '14px',
-                    backgroundColor: '#313244',
-                    color: '#cdd6f4',
-                    transition: 'all 0.2s',
-                  }}
-                >
-                  {plane}
-                </button>
-              ))}
+              {(['XY', 'XZ', 'YZ'] as StandardPlane[]).map((plane) => {
+                const planeColors: Record<string, string> = { XY: '#a6e3a1', XZ: '#89b4fa', YZ: '#cba6f7' };
+                const color = planeColors[plane] || '#cdd6f4';
+                return (
+                  <button
+                    key={plane}
+                    onClick={() => handlePlaneSelected(plane)}
+                    style={{
+                      flex: 1,
+                      padding: '14px 20px',
+                      border: `1px solid ${color}40`,
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontWeight: 700,
+                      fontSize: '15px',
+                      backgroundColor: `${color}15`,
+                      color,
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = `${color}30`;
+                      e.currentTarget.style.borderColor = color;
+                      e.currentTarget.style.transform = 'translateY(-1px)';
+                      e.currentTarget.style.boxShadow = `0 4px 12px ${color}20`;
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = `${color}15`;
+                      e.currentTarget.style.borderColor = `${color}40`;
+                      e.currentTarget.style.transform = '';
+                      e.currentTarget.style.boxShadow = '';
+                    }}
+                  >
+                    {plane}
+                  </button>
+                );
+              })}
             </div>
-            <div style={{ marginTop: '12px' }}>
-              <label style={{ fontSize: '12px', color: '#a6adc8', display: 'block', marginBottom: '4px' }}>
+            <div style={{ marginTop: '16px' }}>
+              <label style={{ fontSize: '12px', color: '#a6adc8', display: 'block', marginBottom: '6px', fontWeight: 500 }}>
                 Offset from plane
               </label>
               <input
@@ -942,13 +1046,14 @@ export function Toolbar({ isMobile = false, toolsOpen = false, setToolsOpen }: T
                 onChange={(e) => setPlaneOffset(parseFloat(e.target.value) || 0)}
                 style={{
                   width: '100%',
-                  padding: '6px 8px',
-                  backgroundColor: '#313244',
+                  padding: '10px 12px',
+                  backgroundColor: '#181825',
                   border: '1px solid #45475a',
-                  borderRadius: '4px',
+                  borderRadius: '6px',
                   color: '#cdd6f4',
-                  fontSize: '13px',
+                  fontSize: '14px',
                   boxSizing: 'border-box' as const,
+                  outline: 'none',
                 }}
                 step="1"
               />

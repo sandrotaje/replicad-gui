@@ -3,6 +3,7 @@ import { useFeatureStore } from '../store/useFeatureStore';
 import { FeatureEditDialog } from './FeatureEditDialog';
 import { BevelEditDialog } from './BevelEditDialog';
 import { SweepDialog } from './SweepDialog';
+import { showToast } from '../utils/toast';
 import type {
   Feature,
   SketchFeature,
@@ -78,6 +79,7 @@ const ProjectMenu: React.FC<ProjectMenuProps> = ({ isOpen, onClose, anchorPositi
 
   const handleSave = () => {
     saveToLocalStorage();
+    showToast('Project saved', 'success');
     onClose();
   };
 
@@ -89,6 +91,7 @@ const ProjectMenu: React.FC<ProjectMenuProps> = ({ isOpen, onClose, anchorPositi
       if (!confirmed) return;
     }
     loadFromLocalStorage();
+    showToast('Project loaded', 'success');
     onClose();
   };
 
@@ -102,6 +105,7 @@ const ProjectMenu: React.FC<ProjectMenuProps> = ({ isOpen, onClose, anchorPositi
       }
     }
     clearProject();
+    showToast('New project created', 'info');
     onClose();
   };
 
@@ -856,6 +860,8 @@ export const FeatureTree: React.FC = () => {
             onClick={undo}
             disabled={!canUndo()}
             style={historyButtonStyle(!canUndo())}
+            onMouseEnter={(e) => { if (canUndo()) e.currentTarget.style.backgroundColor = '#45475a'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = canUndo() ? '#313244' : '#1e1e2e'; }}
             title="Undo (Ctrl+Z)"
           >
             ↩
@@ -864,6 +870,8 @@ export const FeatureTree: React.FC = () => {
             onClick={redo}
             disabled={!canRedo()}
             style={historyButtonStyle(!canRedo())}
+            onMouseEnter={(e) => { if (canRedo()) e.currentTarget.style.backgroundColor = '#45475a'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = canRedo() ? '#313244' : '#1e1e2e'; }}
             title="Redo (Ctrl+Y)"
           >
             ↪
@@ -889,21 +897,79 @@ export const FeatureTree: React.FC = () => {
         {features.length === 0 ? (
           <div
             style={{
-              padding: '16px 12px',
+              padding: '20px 16px',
               fontSize: '12px',
               color: '#6c7086',
-              lineHeight: 1.6,
+              lineHeight: 1.7,
             }}
           >
-            <div>No features yet.</div>
-            <div style={{ marginTop: '8px' }}>
-              Press <kbd style={{
-                backgroundColor: '#313244',
-                padding: '2px 6px',
-                borderRadius: '3px',
-                fontSize: '11px',
-                fontFamily: 'monospace',
-              }}>S</kbd> to start a new sketch
+            <div style={{
+              fontSize: '13px',
+              color: '#a6adc8',
+              fontWeight: 500,
+              marginBottom: '12px',
+            }}>
+              Get started
+            </div>
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <kbd style={{
+                  backgroundColor: '#313244',
+                  padding: '2px 7px',
+                  borderRadius: '4px',
+                  fontSize: '11px',
+                  fontFamily: 'monospace',
+                  color: '#a6e3a1',
+                  border: '1px solid #45475a',
+                  minWidth: '16px',
+                  textAlign: 'center' as const,
+                }}>S</kbd>
+                <span>New sketch</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <kbd style={{
+                  backgroundColor: '#313244',
+                  padding: '2px 7px',
+                  borderRadius: '4px',
+                  fontSize: '11px',
+                  fontFamily: 'monospace',
+                  color: '#89b4fa',
+                  border: '1px solid #45475a',
+                  minWidth: '16px',
+                  textAlign: 'center' as const,
+                }}>E</kbd>
+                <span>Extrude sketch</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <kbd style={{
+                  backgroundColor: '#313244',
+                  padding: '2px 7px',
+                  borderRadius: '4px',
+                  fontSize: '11px',
+                  fontFamily: 'monospace',
+                  color: '#f38ba8',
+                  border: '1px solid #45475a',
+                  minWidth: '16px',
+                  textAlign: 'center' as const,
+                }}>X</kbd>
+                <span>Cut with sketch</span>
+              </div>
+            </div>
+            <div style={{
+              marginTop: '14px',
+              padding: '8px 10px',
+              backgroundColor: 'rgba(137, 180, 250, 0.08)',
+              borderRadius: '6px',
+              border: '1px solid rgba(137, 180, 250, 0.15)',
+              fontSize: '11px',
+              color: '#a6adc8',
+              lineHeight: 1.5,
+            }}>
+              Right-click a feature to edit or delete it. Double-click to open its editor.
             </div>
           </div>
         ) : (

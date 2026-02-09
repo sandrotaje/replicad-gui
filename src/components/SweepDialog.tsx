@@ -65,12 +65,13 @@ export const SweepDialog: React.FC<SweepDialogProps> = ({
 
   const dialogStyle: React.CSSProperties = {
     backgroundColor: '#1e1e2e',
-    border: '1px solid #313244',
-    borderRadius: '8px',
-    padding: '20px',
+    border: '1px solid #45475a',
+    borderRadius: '12px',
+    padding: '24px',
     minWidth: '320px',
     maxWidth: '400px',
-    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+    boxShadow: '0 12px 40px rgba(0, 0, 0, 0.5)',
+    animation: 'dialog-in 0.2s ease-out',
   };
 
   const fieldStyle: React.CSSProperties = { marginBottom: '16px' };

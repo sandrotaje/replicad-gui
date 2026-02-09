@@ -265,8 +265,25 @@ const FloatingConstraints: React.FC<FloatingConstraintsProps> = ({
               alignItems: 'center',
               justifyContent: 'center',
               boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+              transition: 'all 0.15s ease',
             }}
             title={constraint.label}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'rgba(137, 180, 250, 0.3)';
+              e.currentTarget.style.borderColor = 'rgba(137, 180, 250, 0.6)';
+              e.currentTarget.style.transform = 'scale(1.1)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'rgba(30, 30, 46, 0.95)';
+              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+              e.currentTarget.style.transform = 'scale(1)';
+            }}
+            onMouseDown={(e) => {
+              e.currentTarget.style.transform = 'scale(0.95)';
+            }}
+            onMouseUp={(e) => {
+              e.currentTarget.style.transform = 'scale(1.1)';
+            }}
           >
             {constraint.icon}
           </button>
@@ -295,8 +312,23 @@ const FloatingConstraints: React.FC<FloatingConstraintsProps> = ({
           alignItems: 'center',
           justifyContent: 'center',
           boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+          transition: 'all 0.15s ease',
         }}
-        title="Delete"
+        title="Delete selected elements"
+        onMouseEnter={(e) => {
+          e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 1)';
+          e.currentTarget.style.transform = 'scale(1.1)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.9)';
+          e.currentTarget.style.transform = 'scale(1)';
+        }}
+        onMouseDown={(e) => {
+          e.currentTarget.style.transform = 'scale(0.95)';
+        }}
+        onMouseUp={(e) => {
+          e.currentTarget.style.transform = 'scale(1.1)';
+        }}
       >
         🗑
       </button>
