@@ -6,15 +6,15 @@
 
 [Live Demo](https://sandrotaje.github.io/replicad-gui/)
 
-## Features
+## ✨ Features
 
-### 2D Sketcher
+### ✏️ 2D Sketcher
 - Drawing tools: rectangles, circles, lines (free/horizontal/vertical), arcs, and splines
 - Geometric constraint solver (coincident, parallel, perpendicular, tangent, equal, fixed, distance, angle)
 - Auto-constraint detection as you draw
 - Closed profile and open path detection for extrusion/sweep operations
 
-### 3D Modeling Operations
+### 🧊 3D Modeling Operations
 - **Extrude** — push a closed profile into a 3D solid (new body, fuse, or cut)
 - **Cut** — subtract material using a sketch profile, with through-all support
 - **Sweep** — sweep a closed profile along an open path
@@ -25,11 +25,11 @@
 - **Linear Pattern** — repeat a feature along a direction
 - **Polar Pattern** — repeat a feature around an axis
 
-### Sketch Planes
+### 📐 Sketch Planes
 - Standard planes: XY, XZ, YZ
 - Sketch on any planar face of an existing solid
 
-### Workflow
+### 🔄 Workflow
 - Parametric feature tree with dependency tracking and dirty propagation
 - Undo / redo (snapshot-based, up to 30 levels)
 - Real-time 3D preview powered by Three.js
@@ -38,12 +38,12 @@
 - Generated replicad JavaScript code view (Monaco editor)
 - Auto-save to localStorage
 
-### View Modes
+### 🖥️ View Modes
 - Split view (sketcher + 3D side by side)
 - Sketcher only
 - 3D only
 
-## Getting Started
+## 🚀 Getting Started
 
 ### Prerequisites
 
@@ -60,7 +60,7 @@ npm run dev
 
 Visit `http://localhost:5173` to start designing.
 
-## Keyboard Shortcuts
+## ⌨️ Keyboard Shortcuts
 
 | Shortcut | Action |
 |----------|--------|
@@ -73,7 +73,7 @@ Visit `http://localhost:5173` to start designing.
 | `E` | Extrude |
 | `X` | Cut |
 
-## Tech Stack
+## 🛠️ Tech Stack
 
 - **React 19** + **TypeScript** (strict)
 - **Replicad** — CAD kernel (OpenCASCADE WASM)
